@@ -1,6 +1,7 @@
 @echo off
+chcp 65001 >nul
 rem Showrunner 手动启动（有控制台窗口，方便看日志和首次密码）
-cd /d "%~dp0.."
+cd /d "%~dp0"
 if exist "runtime\node\node.exe" (
   "runtime\node\node.exe" src\server.js
 ) else (

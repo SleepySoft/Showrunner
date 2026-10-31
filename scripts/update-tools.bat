@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 rem 更新 yt-dlp 到最新版（网站改版导致下载失败时先跑这个）
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile '%~dp0..\bin\yt-dlp.exe'"
 echo.

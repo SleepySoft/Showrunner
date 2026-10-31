@@ -1,0 +1,17 @@
+{
+  "name": "showrunner",
+  "version": "0.1.0",
+  "description": "Showrunner 放映员 —— 手机编排、电视只读播放的家庭点播系统",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "smoke": "node smoke.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1",
+    "ws": "^8.18.3"
+  }
+}

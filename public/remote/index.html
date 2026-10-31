@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Showrunner 遥控器</title>
+<style>
+  :root {
+    --bg: #f6f6f7; --card: #fff; --line: #e4e4e7;
+    --text: #18181b; --sub: #71717a; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0c0c0e; --card: #18181b; --line: #2c2c30; --text: #f4f4f5; --sub: #a1a1aa; }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text);
+    max-width: 560px; margin: 0 auto; min-height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  header { padding: 16px 16px 0; display: flex; align-items: baseline; justify-content: space-between; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header .conn { font-size: 12px; color: var(--sub); }
+  header .conn.on { color: #16a34a; }
+
+  nav { display: flex; gap: 4px; padding: 12px 16px 0; border-bottom: 1px solid var(--line); }
+  nav button {
+    flex: 1; padding: 10px 0; border: none; background: none; font-size: 15px;
+    color: var(--sub); border-bottom: 2px solid transparent; cursor: pointer;
+  }
+  nav button.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+
+  main { flex: 1; padding: 16px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 12px;
+  }
+
+  /* 正在播放 */
+  .now-title { font-size: 17px; font-weight: 600; line-height: 1.4; }
+  .now-status { font-size: 13px; color: var(--sub); margin-top: 4px; }
+  .progress { margin: 14px 0 6px; }
+  input[type=range] { width: 100%; accent-color: var(--text); }
+  .times { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
+  .transport { display: flex; gap: 10px; margin-top: 14px; }
+  .transport button {
+    flex: 1; padding: 14px 0; font-size: 20px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); border-radius: 10px; cursor: pointer;
+  }
+  .transport button.main { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .vol { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; color: var(--sub); }
+  .maint {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--sub);
+  }
+  .maint.warn { color: #b45309; }
+  .maint button {
+    padding: 7px 12px; font-size: 13px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); color: var(--text); cursor: pointer;
+  }
+
+  /* 列表 */
+  .item {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; margin-bottom: 8px;
+  }
+  .item.playing { border-color: var(--text); border-width: 2px; padding: 11px; }
+  .item .t { flex: 1; min-width: 0; }
+  .item .t .name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .t .meta { font-size: 12px; color: var(--sub); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item button {
+    border: 1px solid var(--line); background: none; color: var(--sub);
+    width: 34px; height: 34px; border-radius: 8px; font-size: 15px; cursor: pointer; flex-shrink: 0;
+  }
+  .item button.del { color: var(--danger); }
+  .badge {
+    display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px;
+    border: 1px solid var(--line); color: var(--sub); margin-right: 6px; vertical-align: 1px;
+  }
+  .badge.on { color: #16a34a; border-color: #16a34a; }
+  .empty { text-align: center; color: var(--sub); font-size: 14px; padding: 48px 0; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar button, .plbar button {
+    padding: 9px 14px; font-size: 14px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); border-radius: 8px; cursor: pointer;
+  }
+  .toolbar button.warn { color: var(--danger); }
+  .toolbar button.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+
+  /* 节目单选择栏 */
+  .plbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: stretch; }
+  .plbar select {
+    flex: 1; min-width: 0; padding: 9px 10px; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text);
+  }
+  .plbar button { flex-shrink: 0; }
+  .plbar button.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+  .pl-status { font-size: 12px; color: var(--sub); margin: -4px 0 12px; }
+
+  /* 目录 chips */
+  .dirs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .dir-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; padding: 5px 8px 5px 10px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line); color: var(--sub);
+    max-width: 100%;
+  }
+  .dir-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+  .dir-chip button { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 13px; padding: 0 2px; }
+  .dir-chip.add { color: var(--text); cursor: pointer; font-weight: 600; border: 1px solid var(--line); }
+
+  /* 弹窗通用 */
+  .modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    display: none; align-items: flex-end; justify-content: center; z-index: 20;
+  }
+  .modal.show { display: flex; }
+  .sheet {
+    background: var(--bg); width: 100%; max-width: 560px; max-height: 80vh;
+    border-radius: 16px 16px 0 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sheet-head { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .sheet-head .p { font-size: 13px; color: var(--sub); word-break: break-all; }
+  .sheet-head .p b { color: var(--text); font-weight: 600; }
+  .sheet-tabs { display: flex; gap: 4px; padding: 10px 16px 0; }
+  .sheet-tabs button {
+    flex: 1; padding: 9px 0; border: none; background: none; font-size: 14px;
+    color: var(--sub); border-bottom: 2px solid transparent; cursor: pointer;
+  }
+  .sheet-tabs button.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+  .sheet-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+  .sheet-body .row {
+    display: flex; align-items: center; gap: 10px; padding: 12px 4px;
+    border-bottom: 1px solid var(--line); cursor: pointer; font-size: 15px;
+  }
+  .sheet-body .row:last-child { border-bottom: none; }
+  .sheet-body .row .vc { margin-left: auto; font-size: 12px; color: var(--sub); flex-shrink: 0; }
+  .sheet-body .row .add-one {
+    margin-left: auto; border: 1px solid var(--line); background: none; color: var(--sub);
+    width: 32px; height: 32px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
+  }
+  .sheet-body .row .add-one.done { color: #16a34a; border-color: #16a34a; }
+  .sheet-foot { display: flex; gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .sheet-foot button { flex: 1; padding: 13px; font-size: 15px; border-radius: 10px; cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .sheet-foot button.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+  .linkrow { display: flex; gap: 8px; }
+  .linkrow input {
+    flex: 1; min-width: 0; padding: 11px 12px; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text);
+  }
+  .linkrow button {
+    padding: 11px 16px; font-size: 14px; font-weight: 600; border: none; border-radius: 10px;
+    background: var(--text); color: var(--bg); cursor: pointer; flex-shrink: 0;
+  }
+  .add-hint { font-size: 12px; color: var(--sub); margin-top: 10px; line-height: 1.6; }
+
+  /* 登录 */
+  #login {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px; z-index: 10;
+  }
+  #login.hidden { display: none; }
+  #login h1 { font-size: 24px; margin-bottom: 8px; }
+  #login p { color: var(--sub); font-size: 14px; margin-bottom: 24px; }
+  #login input {
+    width: 100%; max-width: 300px; padding: 14px; font-size: 16px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text);
+    margin-bottom: 12px; text-align: center;
+  }
+  #login button {
+    width: 100%; max-width: 300px; padding: 14px; font-size: 16px; font-weight: 600;
+    border: none; border-radius: 10px; background: var(--text); color: var(--bg); cursor: pointer;
+  }
+  #login .err { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>📺 Showrunner</h1>
+  <p>家庭点播 · 家长遥控器</p>
+  <input id="pwd" type="password" placeholder="遥控器密码" autocomplete="current-password">
+  <button id="loginBtn">进入</button>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<header>
+  <h1>📺 Showrunner</h1>
+  <span class="conn" id="conn">连接中…</span>
+</header>
+
+<nav>
+  <button data-tab="now" class="active">正在播放</button>
+  <button data-tab="queue">节目单</button>
+  <button data-tab="library">片库</button>
+</nav>
+
+<main>
+  <!-- 正在播放 -->
+  <section id="tab-now" class="tab active">
+    <div class="card">
+      <div class="now-title" id="nowTitle">—</div>
+      <div class="now-status" id="nowStatus">待机中</div>
+      <div class="progress">
+        <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+        <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+      </div>
+      <div class="transport">
+        <button id="btnPrev" title="上一部">⏮</button>
+        <button id="btnPlay" class="main">▶</button>
+        <button id="btnNext" title="下一部">⏭</button>
+        <button id="btnStandby" title="停播待机">⏹</button>
+      </div>
+      <div class="vol">🔈 <input type="range" id="vol" min="0" max="1" step="0.05" value="1"></div>
+      <div class="maint" id="maintRow">
+        <span id="maintLabel">电视：锁定播放</span>
+        <button id="btnMaint">进入维护模式</button>
+      </div>
+    </div>
+    <div class="card" id="upnextCard" style="display:none">
+      <div style="font-size:13px;color:var(--sub);margin-bottom:8px">接下来</div>
+      <div id="upnext" style="font-size:14px;line-height:2"></div>
+    </div>
+  </section>
+
+  <!-- 节目单 -->
+  <section id="tab-queue" class="tab">
+    <div class="plbar">
+      <select id="plSelect"></select>
+      <button id="btnPlActivate" class="primary">播出</button>
+      <button id="btnPlNew" title="新建节目单">＋</button>
+      <button id="btnPlRename" title="重命名">✎</button>
+      <button id="btnPlDelete" title="删除">🗑</button>
+    </div>
+    <div class="pl-status" id="plStatus"></div>
+    <div class="toolbar">
+      <button id="btnAddItem" class="primary">＋ 添加节目</button>
+    </div>
+    <div id="queueList"></div>
+  </section>
+
+  <!-- 片库 -->
+  <section id="tab-library" class="tab">
+    <div class="dirs" id="dirChips"></div>
+    <div class="toolbar">
+      <button id="btnRescan">重新扫描</button>
+      <span id="libCount" style="align-self:center;font-size:13px;color:var(--sub)"></span>
+    </div>
+    <div id="libList"></div>
+  </section>
+</main>
+
+<!-- 目录浏览弹窗 -->
+<div id="browseModal" class="modal">
+  <div class="sheet">
+    <div class="sheet-head">
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px">选择媒体目录</div>
+      <div class="p" id="browsePath">…</div>
+    </div>
+    <div class="sheet-body" id="browseList"></div>
+    <div class="sheet-foot">
+      <button id="browseUp">↑ 上一级</button>
+      <button id="browsePick" class="primary">选择此目录</button>
+      <button id="browseCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 添加节目弹窗 -->
+<div id="addModal" class="modal">
+  <div class="sheet">
+    <div class="sheet-head">
+      <div style="font-size:15px;font-weight:600">添加到「<span id="addTarget"></span>」</div>
+    </div>
+    <div class="sheet-tabs">
+      <button id="addTabLink" class="active">贴链接</button>
+      <button id="addTabLocal">片库挑选</button>
+    </div>
+    <div class="sheet-body">
+      <div id="addPaneLink">
+        <div class="linkrow">
+          <input id="linkInput" type="url" placeholder="粘贴 B 站 / 优酷 / YouTube 链接…" inputmode="url">
+          <button id="btnAddLink">添加</button>
+        </div>
+        <div class="add-hint">标题自动解析；可连续添加多条。网页片源会由服务器提前下载缓存，轮到播放时直接播本地文件。</div>
+      </div>
+      <div id="addPaneLocal" style="display:none">
+        <div id="pickList"></div>
+      </div>
+    </div>
+    <div class="sheet-foot">
+      <button id="addClose" class="primary">完成</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let token = sessionStorage.getItem('sr_token') || null;
+let state = null, queue = [], playlists = [], activeId = null, selectedPlId = null;
+let modeStatus = null;
+let cacheBrief = []; // 网页片源缓存状态摘要（来自 /api/state）
+
+// ---------- API ----------
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : {},
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    credentials: 'same-origin'
+  });
+  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.status); }
+  return res.json();
+}
+
+// ---------- 登录 ----------
+function showLogin() { $('login').classList.remove('hidden'); }
+function hideLogin() { $('login').classList.add('hidden'); }
+
+$('loginBtn').onclick = async () => {
+  try {
+    const r = await api('/login', { method: 'POST', body: { password: $('pwd').value } });
+    token = r.token;
+    sessionStorage.setItem('sr_token', token);
+    hideLogin();
+    boot();
+  } catch { $('loginErr').textContent = '密码不对，再试一次'; }
+};
+$('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+// ---------- WebSocket ----------
+function connectWs() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws?role=remote&token=${token}`);
+  ws.onopen = () => { $('conn').textContent = '已连接'; $('conn').classList.add('on'); };
+  ws.onclose = () => {
+    $('conn').textContent = '已断开'; $('conn').classList.remove('on');
+    setTimeout(connectWs, 2000);
+  };
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'state') {
+      state = msg.data;
+      // 用当前片的装饰字段就地更新缓存摘要，避免每个进度包都请求 /api/state
+      const cur = state.current;
+      if (cur && cur.type === 'web' && cur.cacheStatus) {
+        const e0 = cacheBrief.find(c => c.url === cur.url);
+        if (e0) { e0.status = cur.cacheStatus; e0.progress = cur.progress || 0; e0.error = cur.cacheError; }
+        else cacheBrief.push({ url: cur.url, title: cur.title, status: cur.cacheStatus, progress: cur.progress || 0 });
+      }
+      renderNow();
+      throttledRefreshPlaylists();
+    }
+    if (msg.type === 'mode') { modeStatus = msg.data; renderMode(); }
+  };
+}
+
+// ---------- 维护模式 ----------
+async function refreshMode() {
+  modeStatus = await api('/mode');
+  renderMode();
+}
+function renderMode() {
+  if (!modeStatus) return;
+  const row = $('maintRow');
+  if (!modeStatus.manageBrowser) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  const m = modeStatus.mode === 'maintenance';
+  row.classList.toggle('warn', m);
+  if (m) {
+    const leftMin = Math.max(1, Math.ceil(((modeStatus.maintenanceUntil || 0) - Date.now()) / 60000));
+    $('maintLabel').textContent = `🔧 维护模式 · 约 ${leftMin} 分钟后自动回锁`;
+    $('btnMaint').textContent = '立即回锁';
+  } else {
+    $('maintLabel').textContent = modeStatus.kioskRunning ? '电视：锁定播放（kiosk 运行中）' : '电视：锁定播放';
+    $('btnMaint').textContent = '进入维护模式';
+  }
+}
+$('btnMaint').onclick = async () => {
+  const target = modeStatus?.mode === 'maintenance' ? 'normal' : 'maintenance';
+  if (target === 'maintenance' && !confirm('进入维护模式：电视的锁定画面会关闭，并打开一个普通浏览器窗口。\n约 10 分钟无操作自动回锁。继续？')) return;
+  modeStatus = await api('/mode', { method: 'POST', body: { mode: target } });
+  renderMode();
+};
+// 倒计时每分钟刷新一次
+setInterval(() => { if (modeStatus?.mode === 'maintenance') renderMode(); }, 30000);
+
+// ---------- 数据 ----------
+async function refreshAll() {
+  const r = await api('/state');
+  state = r.state; queue = r.queue; playlists = r.playlists; activeId = r.activeId; cacheBrief = r.cache || [];
+  if (!selectedPlId || !playlists.some(p => p.id === selectedPlId)) selectedPlId = activeId || playlists[0]?.id || null;
+  renderNow(); renderPlBar();
+  await renderSelectedPlaylist();
+  await renderLibrary();
+}
+let plRefreshTimer = null;
+function throttledRefreshPlaylists() {
+  if (plRefreshTimer) return;
+  plRefreshTimer = setTimeout(() => { plRefreshTimer = null; refreshPlaylists(); }, 1500);
+}
+async function refreshPlaylists() {
+  const r = await api('/state');
+  queue = r.queue; playlists = r.playlists; activeId = r.activeId; cacheBrief = r.cache || [];
+  renderPlBar();
+  await renderSelectedPlaylist();
+}
+async function renderSelectedPlaylist() {
+  if (!selectedPlId) { $('queueList').innerHTML = '<div class="empty">还没有节目单<br>点上方「＋」创建一个</div>'; $('plStatus').textContent = ''; return; }
+  const r = await api('/playlists/' + selectedPlId);
+  renderQueue(r.playlist);
+}
+
+// ---------- 节目单管理栏 ----------
+function renderPlBar() {
+  const sel = $('plSelect');
+  sel.innerHTML = '';
+  if (!playlists.length) {
+    sel.innerHTML = '<option value="">（无节目单）</option>';
+  }
+  for (const p of playlists) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = (p.active ? '▶ ' : '') + p.name + `（${p.count}）`;
+    sel.appendChild(opt);
+  }
+  sel.value = selectedPlId || '';
+  const active = playlists.find(p => p.active);
+  $('plStatus').textContent = active
+    ? `正在播出「${active.name}」` + (state?.current ? `，第 ${(state.current.index ?? 0) + 1} / ${active.count} 个` : '，待机中')
+    : '当前没有播出中的节目单';
+}
+$('plSelect').onchange = async () => { selectedPlId = $('plSelect').value || null; renderPlBar(); await renderSelectedPlaylist(); };
+
+$('btnPlNew').onclick = async () => {
+  const name = prompt('节目单名称', '周末纪录片之夜');
+  if (name === null) return;
+  const r = await api('/playlists', { method: 'POST', body: { name } });
+  selectedPlId = r.playlist.id;
+  await refreshPlaylists();
+};
+$('btnPlRename').onclick = async () => {
+  const cur = playlists.find(p => p.id === selectedPlId);
+  if (!cur) return;
+  const name = prompt('重命名节目单', cur.name);
+  if (name === null) return;
+  await api(`/playlists/${cur.id}/rename`, { method: 'POST', body: { name } });
+  await refreshPlaylists();
+};
+$('btnPlDelete').onclick = async () => {
+  const cur = playlists.find(p => p.id === selectedPlId);
+  if (!cur) return;
+  const warn = cur.active ? '这是正在播出的节目单，删除后电视将停播待机。确定删除？' : `删除节目单「${cur.name}」？`;
+  if (!confirm(warn)) return;
+  await api('/playlists/' + cur.id, { method: 'DELETE' });
+  selectedPlId = null;
+  await refreshAll();
+};
+$('btnPlActivate').onclick = async () => {
+  if (!selectedPlId) return;
+  await api(`/playlists/${selectedPlId}/activate`, { method: 'POST' });
+  await refreshAll();
+};
+
+// ---------- 节目单条目 ----------
+function renderQueue(playlist) {
+  const list = $('queueList');
+  const items = playlist.items;
+  const isActive = playlist.active;
+  list.innerHTML = items.length ? '' : '<div class="empty">节目单为空<br>点「＋ 添加节目」贴链接或从片库挑选</div>';
+  const curQid = isActive ? state?.current?.qid : null;
+  items.forEach((it, i) => {
+    const div = document.createElement('div');
+    const isPlaying = it.qid === curQid;
+    div.className = 'item' + (isPlaying ? ' playing' : '');
+    const badge = (isPlaying ? '<span class="badge on">▶ 播放中</span>' : '') + (it.type === 'web' ? '<span class="badge">🌐 网页</span>' : '');
+    div.innerHTML = `<div class="t"><div class="name">${i + 1}. ${badge}${esc(it.title)}</div>
+      <div class="meta">${esc(it.relPath)}${cacheBadgeHtml(it)}</div></div>`;
+    const mk = (txt, title, fn, cls) => {
+      const b = document.createElement('button');
+      b.textContent = txt; b.title = title; if (cls) b.className = cls;
+      b.onclick = fn; div.appendChild(b);
+    };
+    if (isActive) mk('▶', '点播这一个', async () => { await api('/control', { method: 'POST', body: { action: 'jump', qid: it.qid } }); });
+    // 缓存失败的网页条目：提供重试按钮
+    const ce = it.type === 'web' ? cacheBrief.find(c => c.url === it.url) : null;
+    if (ce && ce.status === 'failed') {
+      mk('↻', '重试缓存：' + (ce.error || ''), async () => {
+        await api(`/cache/${ce.key}/retry`, { method: 'POST' });
+        await refreshPlaylists();
+      });
+    }
+    mk('↑', '上移', async () => { if (i > 0) { await api(`/playlists/${playlist.id}/items/move`, { method: 'POST', body: { qid: it.qid, toIndex: i - 1 } }); await refreshPlaylists(); } });
+    mk('↓', '下移', async () => { if (i < items.length - 1) { await api(`/playlists/${playlist.id}/items/move`, { method: 'POST', body: { qid: it.qid, toIndex: i + 1 } }); await refreshPlaylists(); } });
+    mk('✕', '移除', async () => { await api(`/playlists/${playlist.id}/items/${it.qid}`, { method: 'DELETE' }); await refreshPlaylists(); }, 'del');
+    list.appendChild(div);
+  });
+}
+
+// ---------- 添加节目弹窗 ----------
+$('btnAddItem').onclick = async () => {
+  const cur = playlists.find(p => p.id === selectedPlId);
+  if (!cur) { alert('先创建一个节目单'); return; }
+  $('addTarget').textContent = cur.name + (cur.active ? '（播出中）' : '');
+  $('addModal').classList.add('show');
+  await renderPickList();
+};
+$('addClose').onclick = async () => { $('addModal').classList.remove('show'); await refreshPlaylists(); };
+$('addTabLink').onclick = () => switchAddPane(true);
+$('addTabLocal').onclick = () => switchAddPane(false);
+function switchAddPane(link) {
+  $('addTabLink').classList.toggle('active', link);
+  $('addTabLocal').classList.toggle('active', !link);
+  $('addPaneLink').style.display = link ? '' : 'none';
+  $('addPaneLocal').style.display = link ? 'none' : '';
+  if (!link) renderPickList();
+}
+
+async function addToSelected(body) {
+  return api(`/playlists/${selectedPlId}/items`, { method: 'POST', body });
+}
+
+$('btnAddLink').onclick = addLink;
+$('linkInput').addEventListener('keydown', e => { if (e.key === 'Enter') addLink(); });
+async function addLink() {
+  const url = $('linkInput').value.trim();
+  if (!url) return;
+  $('btnAddLink').textContent = '解析中…';
+  try {
+    await addToSelected({ url });
+    $('linkInput').value = '';
+  } catch (e) { alert('添加失败：' + e.message); }
+  finally { $('btnAddLink').textContent = '添加'; }
+}
+
+async function renderPickList() {
+  const r = await api('/library');
+  const box = $('pickList');
+  box.innerHTML = r.items.length ? '' : '<div class="empty">片库为空<br>先去「片库」页添加媒体目录</div>';
+  const inPl = new Set();
+  for (const it of r.items) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.cursor = 'default';
+    row.innerHTML = `<div class="t" style="flex:1;min-width:0"><div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.title)}</div>
+      <div style="font-size:12px;color:var(--sub);margin-top:2px">${esc(it.relPath)} · ${fmtSize(it.size)}</div></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'add-one';
+    btn.textContent = '＋';
+    btn.onclick = async () => {
+      await addToSelected({ mediaId: it.id });
+      btn.textContent = '✓'; btn.classList.add('done');
+    };
+    row.appendChild(btn);
+    box.appendChild(row);
+  }
+}
+
+// ---------- 片库 ----------
+async function renderLibrary(rescan) {
+  const r = await api('/library' + (rescan ? '?rescan=1' : ''));
+  const dirs = r.mediaDirs || [];
+  renderDirChips(dirs);
+  $('libCount').textContent = r.items.length + ' 部影片';
+  $('libList').innerHTML = r.items.length ? ''
+    : '<div class="empty">片库为空<br>点上方「＋ 添加目录」，在网页上挑选影片所在文件夹</div>';
+  for (const it of r.items) {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `<div class="t"><div class="name">${esc(it.title)}</div>
+      <div class="meta">${esc(it.relPath)} · ${fmtSize(it.size)}</div></div>`;
+    const btn = document.createElement('button');
+    btn.textContent = '＋';
+    btn.title = '加入播出中节目单';
+    btn.onclick = async () => {
+      try { await api('/queue', { method: 'POST', body: { mediaId: it.id } }); await refreshPlaylists(); }
+      catch (e) { alert(e.message); }
+    };
+    div.appendChild(btn);
+    $('libList').appendChild(div);
+  }
+}
+
+function renderDirChips(dirs) {
+  const box = $('dirChips');
+  box.innerHTML = '';
+  for (const d of dirs) {
+    const chip = document.createElement('span');
+    chip.className = 'dir-chip';
+    chip.innerHTML = `<span title="${esc(d)}">📁 ${esc(shortPath(d))}</span>`;
+    const x = document.createElement('button');
+    x.textContent = '✕';
+    x.title = '移出片库';
+    x.onclick = async () => {
+      if (confirm(`把「${d}」移出片库？（不删除磁盘文件）`)) {
+        await api('/dirs', { method: 'DELETE', body: { path: d } });
+        await renderLibrary();
+      }
+    };
+    chip.appendChild(x);
+    box.appendChild(chip);
+  }
+  const add = document.createElement('button');
+  add.className = 'dir-chip add';
+  add.textContent = '＋ 添加目录';
+  add.onclick = () => openBrowser(null);
+  box.appendChild(add);
+}
+
+// ---------- 目录浏览弹窗 ----------
+let browsePath = null;
+
+async function openBrowser(path) {
+  browsePath = path || null;
+  await renderBrowse();
+  $('browseModal').classList.add('show');
+}
+async function renderBrowse() {
+  const r = await api('/browse' + (browsePath ? '?path=' + encodeURIComponent(browsePath) : ''));
+  browsePath = r.path;
+  $('browsePath').innerHTML = r.path ? `<b>${esc(r.path)}</b>${r.videoCount ? ` · ${r.videoCount} 部影片` : ''}` : '选择磁盘';
+  $('browseUp').style.visibility = r.parent === null && r.path === null ? 'hidden' : 'visible';
+  $('browseUp').dataset.parent = r.parent ?? '';
+
+  const list = $('browseList');
+  list.innerHTML = r.dirs.length ? '' : '<div class="empty">没有子目录</div>';
+  for (const d of r.dirs) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `📁 <span>${esc(d.name)}</span>`;
+    row.onclick = () => openBrowser(d.path);
+    list.appendChild(row);
+  }
+}
+$('browseUp').onclick = () => openBrowser($('browseUp').dataset.parent || null);
+$('browsePick').onclick = async () => {
+  if (!browsePath) return;
+  try {
+    await api('/dirs', { method: 'POST', body: { path: browsePath } });
+    $('browseModal').classList.remove('show');
+    await renderLibrary();
+  } catch (e) { alert('添加失败：' + e.message); }
+};
+$('browseCancel').onclick = () => $('browseModal').classList.remove('show');
+
+// ---------- 渲染：正在播放 ----------
+function renderNow() {
+  if (!state) return;
+  const cur = state.current;
+  const activePl = playlists.find(p => p.active);
+  $('nowTitle').textContent = cur ? ((cur.type === 'web' ? '🌐 ' : '') + cur.title) : '—';
+  $('nowStatus').textContent = !cur
+    ? (activePl ? `「${activePl.name}」待机中` : '待机中 — 去节目单页创建并播出节目单')
+    : `${({ playing: '▶ 播放中', paused: '⏸ 已暂停', idle: '⏹ 待机' })[state.status] || state.status} · 「${activePl?.name || ''}」第 ${(cur.index ?? 0) + 1} / ${state.queueLength} 个`;
+  $('btnPlay').textContent = state.status === 'playing' ? '⏸' : '▶';
+  $('vol').value = state.volume;
+
+  const dur = state.duration || 0, pos = state.position || 0;
+  if (!seekDragging) $('seek').value = dur > 0 ? (pos / dur * 100) : 0;
+  $('tCur').textContent = fmtTime(pos);
+  $('tDur').textContent = fmtTime(dur);
+
+  // 网页片源：正在播放页显示缓存状态
+  if (cur && cur.type === 'web') {
+    if (cur.cacheError) $('nowStatus').textContent = `⚠️ 缓存失败：${cur.cacheError}`;
+    else if (!cur.stream) $('nowStatus').textContent = `⏳ 正在缓存 ${Math.floor(cur.progress || 0)}%，缓存完成后自动开播`;
+  }
+
+  if (state.upcoming && state.upcoming.length) {
+    $('upnextCard').style.display = '';
+    $('upnext').innerHTML = state.upcoming.map(u => esc(u.title)).join('<br>');
+  } else $('upnextCard').style.display = 'none';
+}
+
+// ---------- 控制 ----------
+$('btnPlay').onclick = () => api('/control', { method: 'POST', body: { action: state?.status === 'playing' ? 'pause' : 'play' } });
+$('btnNext').onclick = () => api('/control', { method: 'POST', body: { action: 'next' } });
+$('btnPrev').onclick = () => api('/control', { method: 'POST', body: { action: 'prev' } });
+$('btnStandby').onclick = () => api('/control', { method: 'POST', body: { action: 'standby' } });
+$('btnRescan').onclick = () => renderLibrary(true);
+$('vol').oninput = () => api('/control', { method: 'POST', body: { action: 'volume', volume: Number($('vol').value) } });
+
+let seekDragging = false;
+$('seek').addEventListener('pointerdown', () => seekDragging = true);
+$('seek').addEventListener('change', () => {
+  const dur = state?.duration || 0;
+  if (dur > 0) api('/control', { method: 'POST', body: { action: 'seek', position: $('seek').value / 100 * dur } });
+  seekDragging = false;
+});
+
+// ---------- 标签页 ----------
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + btn.dataset.tab));
+  };
+});
+
+// ---------- 工具 ----------
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+// 网页条目的缓存状态徽标（失败的可点击重试）
+function cacheBadgeHtml(it) {
+  if (it.type !== 'web') return '';
+  const e = cacheBrief.find(c => c.url === it.url);
+  if (!e) return ' · ⏳ 待缓存';
+  if (e.status === 'ready') return ' · ✅ 已缓存';
+  if (e.status === 'downloading') return ` · ⏳ 缓存中 ${Math.floor(e.progress || 0)}%`;
+  if (e.status === 'pending') return ' · ⏳ 排队中';
+  if (e.status === 'failed') return ` · ⚠️ 缓存失败（点「↻」重试）`;
+  return '';
+}
+function fmtTime(s) { s = Math.floor(s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function fmtSize(b) { return b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB'; }
+function shortPath(p) { const parts = String(p).split(/[\\/]/).filter(Boolean); return parts.slice(-2).join(' / ') || String(p); }
+
+// ---------- 启动 ----------
+async function boot() {
+  connectWs();
+  await refreshAll();
+  await refreshMode();
+}
+(async () => {
+  try { await api('/state'); hideLogin(); boot(); }   // 已有会话
+  catch { showLogin(); }
+})();
+</script>
+</body>
+</html>

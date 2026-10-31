@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Showrunner 电视端</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #standby, #webnote {
+    position: fixed; inset: 0; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    color: #666; font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    user-select: none; text-align: center; padding: 0 48px;
+  }
+  #standby.show, #webnote.show { display: flex; }
+  #standby .icon, #webnote .icon { font-size: 64px; margin-bottom: 24px; }
+  #standby .main, #webnote .main { font-size: 28px; color: #999; }
+  #standby .sub, #webnote .sub { font-size: 16px; color: #555; margin-top: 12px; }
+</style>
+</head>
+<body>
+<video id="player" playsinline></video>
+<div id="standby">
+  <div class="icon">📺</div>
+  <div class="main">节目单已播完</div>
+  <div class="sub">等待家长安排新节目</div>
+</div>
+<div id="webnote">
+  <div class="icon">🌐</div>
+  <div class="main" id="webTitle">网页片源</div>
+  <div class="sub" id="webSub">正在准备…</div>
+</div>
+<script>
+'use strict';
+/*
+ * 电视播放端 —— 哑终端。
+ * 不展示任何片单、不响应任何输入；只向服务器询问「现在放什么」并照做。
+ * 网页片源播放服务器预下载的缓存文件；未缓存完成时黑屏等待，失败时跳过。
+ */
+const video = document.getElementById('player');
+const standby = document.getElementById('standby');
+const $ = id => document.getElementById(id);
+const webnote = $('webnote');
+
+// ---- 输入封锁：键鼠、右键、触摸长按一律无效 ----
+for (const ev of ['contextmenu', 'keydown', 'keyup', 'keypress', 'dblclick']) {
+  window.addEventListener(ev, e => e.preventDefault(), { capture: true });
+}
+video.controls = false;
+video.disablePictureInPicture = true;
+
+let currentSrc = null;   // 当前正在播的流地址
+let currentWebQid = null;
+let webSkipTimer = null;
+let ws = null;
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws?role=tv`);
+
+  ws.onmessage = e => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.type === 'state') applyState(msg.data);
+  };
+  ws.onclose = () => setTimeout(connect, 2000); // 断线自动重连
+}
+
+function stopPlayback() {
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  currentSrc = null;
+}
+
+function showWebnote(cur, sub) {
+  stopPlayback();
+  $('webTitle').textContent = cur.cachedTitle || cur.title;
+  $('webSub').textContent = sub;
+  webnote.classList.add('show');
+}
+
+function playStream(src, s) {
+  if (src !== currentSrc) {
+    currentSrc = src;
+    video.src = src;
+  }
+  video.volume = s.volume;
+
+  // 进度纠偏：与权威进度差超过 3 秒才 seek，避免来回拉扯
+  if (Math.abs(video.currentTime - s.position) > 3) {
+    video.currentTime = s.position;
+  }
+
+  if (s.status === 'playing' && video.paused) video.play().catch(() => {});
+  if (s.status !== 'playing' && !video.paused) video.pause();
+}
+
+function applyState(s) {
+  const cur = s.current;
+  if (!cur) {
+    stopPlayback();
+    currentWebQid = null;
+    clearTimeout(webSkipTimer);
+    webnote.classList.remove('show');
+    standby.classList.add('show');
+    return;
+  }
+  standby.classList.remove('show');
+
+  // 网页片源：优先播放服务器缓存；未就绪则等待，失败则 6 秒后跳过
+  if (cur.type === 'web') {
+    if (cur.stream) {
+      // 已缓存完成 → 当作普通视频播放
+      currentWebQid = null;
+      clearTimeout(webSkipTimer);
+      webnote.classList.remove('show');
+      playStream(cur.stream, s);
+      return;
+    }
+    if (cur.qid !== currentWebQid) {
+      currentWebQid = cur.qid;
+      clearTimeout(webSkipTimer);
+      if (cur.cacheError) {
+        showWebnote(cur, '缓存失败：' + cur.cacheError + '，即将跳过…');
+        if (ws && ws.readyState === 1) {
+          webSkipTimer = setTimeout(() => ws.send(JSON.stringify({ type: 'ended' })), 6000);
+        }
+      }
+    }
+    if (!cur.cacheError) {
+      const pct = Math.floor(cur.progress || 0);
+      showWebnote(cur, cur.cacheStatus === 'downloading' ? `正在缓存 ${pct}%…` : '正在准备…');
+    }
+    return;
+  }
+  currentWebQid = null;
+  clearTimeout(webSkipTimer);
+  webnote.classList.remove('show');
+  playStream(`/media/${cur.mediaId}/stream`, s);
+}
+
+// 播完上报，服务端自动连播
+video.addEventListener('ended', () => {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ended' }));
+});
+
+// 每 5 秒回报真实进度
+setInterval(() => {
+  if (ws && ws.readyState === 1 && !video.paused && currentSrc) {
+    ws.send(JSON.stringify({ type: 'position', position: video.currentTime, duration: video.duration || 0 }));
+  }
+}, 5000);
+
+connect();
+</script>
+</body>
+</html>

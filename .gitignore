@@ -1,0 +1,13 @@
+# 依赖与运行时（install 脚本自动补齐，不入库）
+node_modules/
+runtime/
+bin/*.exe
+
+# 运行期数据（各机器私有）
+data/
+cache/
+config.json
+.smoke-tmp/
+
+# 打包产物
+dist/

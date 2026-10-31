@@ -13,6 +13,8 @@ const { Store } = require('./store');
 const { Library } = require('./library');
 const { QueueManager } = require('./queue');
 const { PlaylistManager } = require('./playlists');
+const { CollectionManager } = require('./collections');
+const { Scheduler } = require('./scheduler');
 const { BrowserController } = require('./browserctl');
 const { Auth } = require('./auth');
 const { apiRouter } = require('./routes/api');
@@ -23,7 +25,7 @@ const { findYtdlp, findFfmpeg, hasFfmpeg, checkYtdlp } = require('./ytdlp');
 
 function createApp(cfg) {
   const store = new Store(cfg.dataFile);
-  const persisted = store.load({ playlists: [], activeId: null, currentIndex: -1, playback: null, settings: {} });
+  const persisted = store.load({ playlists: [], activeId: null, currentIndex: -1, playback: null, settings: {}, collections: [] });
 
   // 旧版数据迁移：单 queue → 包成「默认节目单」
   if (!Array.isArray(persisted.playlists)) {
@@ -48,9 +50,18 @@ function createApp(cfg) {
   library.rescan();
 
   const playlists = new PlaylistManager(persisted);
+  const collections = new CollectionManager(persisted);
+  const scheduler = new Scheduler(persisted);
   // 队列与播出中节目单共享 items 数组引用：编辑节目单即编辑直播队列
   const queue = new QueueManager(persisted, playlists.active()?.items || []);
   const auth = new Auth(cfg.password, cfg.sessionTtlHours);
+
+  // 合集解析器：轮到「合集抽一集」条目时，从合集取下一集
+  queue.resolver = (qItem) => {
+    const r = collections.takeNext(qItem.collectionId);
+    if (!r) return null;
+    return { ...r.item, episode: r.episode, total: r.total };
+  };
 
   // kiosk 浏览器托管：默认仅真实启动时开启（cfg.manageBrowser），测试默认关闭
   const browserctl = new BrowserController({
@@ -71,21 +82,52 @@ function createApp(cfg) {
   });
   if (!ytdlp && !cfg.disableCache) console.warn('未找到 yt-dlp，网页片源将无法缓存（可安装 yt-dlp 或在 config.json 配置 ytdlpPath）');
   queue.decorator = item => cache.decorate(item);
-  if (!cfg.disableCache) queue.on('change', () => cache.prefetchQueue(queue.queue, queue.currentIndex));
+  // 预取时合集条目用已解析的那一集（未解析的等轮到它再说）
+  const effectiveItems = items => items.map(i => (i && i.type === 'collection' ? i.resolved : i));
+  if (!cfg.disableCache) queue.on('change', () => cache.prefetchQueue(effectiveItems(queue.queue), queue.currentIndex));
 
   const persist = () => {
     try {
       store.save({
         ...playlists.serialize(),
+        ...collections.serialize(),
         currentIndex: queue.currentIndex,
         playback: queue.playback,
-        settings: { mediaDirs: library.mediaDirs }
+        settings: { mediaDirs: library.mediaDirs, schedules: scheduler.serialize() }
       });
     } catch (e) { console.error('持久化失败:', e.message); }
   };
   queue.on('change', persist);
   playlists.on('change', persist);
+  collections.on('change', persist);
   const onDirsChange = () => persist();
+
+  /** 切到某节目单并开播（时刻表跃迁用） */
+  const switchToPlaylist = (playlistId, loop) => {
+    const p = playlists.activate(playlistId);
+    if (!p) return false;
+    queue.loadPlaylist(p.items, { loop: loop || p.loop });
+    queue.play();
+    return true;
+  };
+
+  /** 时刻表跃迁执行器：只在窗口进出时动作，不抢家长的手动操作 */
+  const applySchedulerTick = (now = new Date()) => {
+    const d = scheduler.tick(now);
+    if (d.action === 'switch') {
+      if (switchToPlaylist(d.rule.playlistId, d.rule.loop)) {
+        scheduler.applied(d.rule.id);
+      }
+    } else if (d.action === 'standby') {
+      queue.pause();
+      queue.currentIndex = queue.queue.length ? 0 : -1;
+      queue.seek(0);
+      queue.playback.status = 'idle';
+      queue._changed();
+      scheduler.applied(null);
+    }
+    return d;
+  };
 
   const app = express();
   app.disable('x-powered-by');
@@ -97,15 +139,15 @@ function createApp(cfg) {
 
   // 遥控器：静态页 + API
   app.use('/remote', express.static(path.join(cfg.rootDir, 'public', 'remote')));
-  app.use('/api', apiRouter({ auth, library, queue, playlists, browserctl, cache, onDirsChange }));
+  app.use('/api', apiRouter({ auth, library, queue, playlists, collections, scheduler, browserctl, cache, onDirsChange, onPersist: persist, applySchedulerTick }));
 
   app.get('/', (req, res) => res.redirect('/remote/'));
 
-  return { app, queue, library, playlists, browserctl, auth, store, cache };
+  return { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, applySchedulerTick };
 }
 
 async function start(cfg) {
-  const { app, queue, library, playlists, browserctl, auth, store, cache } = createApp(cfg);
+  const { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, applySchedulerTick } = createApp(cfg);
   const server = http.createServer(app);
   const ws = setupWs(server, { auth, queue });
 
@@ -117,6 +159,11 @@ async function start(cfg) {
   browserctl.on('change', s => ws.broadcast({ type: 'mode', data: s }));
   browserctl.start();
 
+  // 时刻表：每 15 秒检查一次窗口跃迁（测试可传 cfg.disableScheduler 关闭）
+  const schedTimer = cfg.disableScheduler ? null : setInterval(() => applySchedulerTick(), 15000);
+  if (schedTimer) schedTimer.unref?.();
+  applySchedulerTick(); // 启动即对齐一次（如重启时正处于窗口中）
+
   // 跟踪活跃连接，close 时全部销毁，保证进程（和测试）能干净退出
   const sockets = new Set();
   server.on('connection', s => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
@@ -126,9 +173,11 @@ async function start(cfg) {
   const addr = server.address();
 
   return {
-    server, app, queue, library, playlists, browserctl, auth, store, cache, ws,
+    server, app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, ws,
+    applySchedulerTick,
     port: addr.port, host: addr.address,
     close: () => new Promise(resolve => {
+      if (schedTimer) clearInterval(schedTimer);
       browserctl.stop();
       for (const c of ws.wss.clients) c.terminate();
       for (const s of sockets) s.destroy();

@@ -136,6 +136,19 @@ function applyState(s) {
     }
     return;
   }
+
+  // 合集条目未解析成功（合集为空/被删）：提示并跳过
+  if (cur.type === 'collection') {
+    if (cur.qid !== currentWebQid) {
+      currentWebQid = cur.qid;
+      clearTimeout(webSkipTimer);
+      showWebnote(cur, (cur.cacheError || '合集为空') + '，即将跳过…');
+      if (ws && ws.readyState === 1) {
+        webSkipTimer = setTimeout(() => ws.send(JSON.stringify({ type: 'ended' })), 6000);
+      }
+    }
+    return;
+  }
   currentWebQid = null;
   clearTimeout(webSkipTimer);
   webnote.classList.remove('show');

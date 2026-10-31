@@ -39,14 +39,18 @@ Base URL：`http://<电脑IP>:7100`
     "queueLength": 3,
     "upcoming": [{ "qid": "...", "title": "..." }]   // 最多 3 部
   },
-  "queue": [{ "qid": "...", "type": "local|web", "title": "...", "addedAt": 0 }],
-  "playlists": [{ "id": "...", "name": "...", "count": 3, "active": true }],
+  "queue": [{ "qid": "...", "type": "local|web|collection", "title": "...", "addedAt": 0 }],
+  "playlists": [{ "id": "...", "name": "...", "count": 3, "active": true, "loop": false }],
   "activeId": "...",
-  "cache": [{ "key": "...", "url": "...", "title": "...", "status": "ready", "progress": 100, "bytes": 0 }]
+  "cache": [{ "key": "...", "url": "...", "title": "...", "status": "ready", "progress": 100, "bytes": 0 }],
+  "collections": [{ "id": "...", "name": "...", "count": 12, "cursor": 3, "mode": "sequential" }],
+  "schedules": [{ "id": "...", "playlistId": "...", "playlistName": "...", "days": [6, 0], "start": "18:00", "end": "20:00", "loop": true }]
 }
 ```
 
 注意：`state`（电视端可见）与 `queue` / `playlists`（仅遥控器可见）是两个信任级别。`queue` 即播出中节目单的条目。
+
+合集条目（`type: "collection"`）成为当前片时，`state.current` 会被伪装成已解析的那一集（local/web 类型），标题形如 `《地球脉动》第3集 深海世界`，并带 `collectionId`；合集为空或已删除时带 `cacheError`。
 
 ## 节目单
 
@@ -78,10 +82,18 @@ Base URL：`http://<电脑IP>:7100`
 
 设为当前播出：队列装入该节目单条目，回到第一部待机（不自动开播）。
 
+### `POST /api/playlists/:id/loop`
+
+```json
+// 请求 { "loop": true } → 200 { "ok": true, "loop": true }
+```
+
+循环开关。播出中的节目单立即作用于直播队列：队尾 `next` 回卷到第一部继续播（合集条目抽新集）。
+
 ### `GET /api/playlists/:id`
 
 ```json
-{ "playlist": { "id": "...", "name": "...", "active": false, "items": [...] } }
+{ "playlist": { "id": "...", "name": "...", "active": false, "loop": false, "items": [...] } }
 ```
 
 ### `POST /api/playlists/:id/items`
@@ -89,6 +101,7 @@ Base URL：`http://<电脑IP>:7100`
 ```json
 // 本地媒体 { "mediaId": "..." } 或 { "mediaIds": [...] }
 // 网页片源 { "url": "https://..." }
+// 合集抽一集 { "collectionId": "..." }
 // 201 { "added": [...] }
 ```
 
@@ -99,6 +112,79 @@ Base URL：`http://<电脑IP>:7100`
 ```json
 // move 请求 { "qid": "...", "toIndex": 2 }
 ```
+
+## 合集
+
+合集是连续剧式内容包：节目单里放「抽一集」条目，轮到它播出时从合集取下一集并推进游标。
+
+### `GET /api/collections`
+
+```json
+{ "collections": [{ "id": "...", "name": "地球脉动", "count": 12, "cursor": 3, "mode": "sequential" }] }
+```
+
+### `POST /api/collections`
+
+```json
+// 请求 { "name": "地球脉动", "mode": "sequential" }   // mode: sequential（顺序）| random（随机不重复）
+// 201 { "collection": { "id": "...", "name": "...", "mode": "...", "count": 0, "cursor": 0 } }
+```
+
+### `GET /api/collections/:id`
+
+返回合集全文（含 items 数组）。不存在返回 404。
+
+### `POST /api/collections/:id/rename` · `/mode` · `/reset`
+
+```json
+// rename { "name": "新名字" } / mode { "mode": "random" } / reset 无请求体（游标归零、随机池重置）
+```
+
+### `DELETE /api/collections/:id`
+
+删除合集（不影响队列里已解析出的剧集条目）。
+
+### `POST /api/collections/:id/items`
+
+请求体同节目单 items（mediaId / mediaIds / url），**禁止嵌套合集**（collectionId 返回 400）。
+
+### `DELETE /api/collections/:id/items/:qid` · `POST /api/collections/:id/items/move`
+
+删除时若删的是游标之前的集，游标同步前移（不串集）。
+
+## 播出时刻表
+
+规则：「周几 + 时段 → 播哪个节目单」。服务端每 15 秒对齐一次；只在窗口进出瞬间动作（同规则生效期间不抢家长的手动操作）。不跨午夜（end 必须晚于 start）。
+
+### `GET /api/schedules`
+
+```json
+{ "rules": [{ "id": "...", "playlistId": "...", "playlistName": "周末纪录片之夜", "days": [6, 0], "start": "18:00", "end": "20:00", "loop": true }] }
+```
+
+### `POST /api/schedules`
+
+```json
+// 请求 { "playlistId": "...", "days": [6, 0], "start": "18:00", "end": "20:00", "loop": true }
+// 201 { "rule": {...} }
+// 400 days 非法 / 时段非法；404 节目单不存在
+```
+
+创建后立即对齐一次——若此刻正处于窗口内，马上切台开播。
+
+### `DELETE /api/schedules/:id`
+
+删除规则；若删的是生效中的规则，立即停播待机。
+
+## 节目表导出
+
+### `GET /api/export`
+
+JSON 全量导出：时刻表 + 节目单全文 + 合集全文。
+
+### `GET /api/export.md`
+
+Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表格、各节目单内容（合集条目标注"下次播第 N 集"）、合集进度（标注 ← 下一集）。适合打印贴在电视旁。
 
 ## 片库与目录
 
@@ -147,6 +233,8 @@ Base URL：`http://<电脑IP>:7100`
 { "mediaIds": ["...", "..."] }
 // 网页片源：直接贴地址，服务端自动抓 <title> 并剥掉站点 SEO 后缀
 { "url": "https://www.bilibili.com/video/BVxxxx" }
+// 合集抽一集
+{ "collectionId": "..." }
 // 201
 { "added": [{ "qid": "...", "type": "local|web", ... }] }
 // 400 链接非法或非 http/https / 404 媒体不存在

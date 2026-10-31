@@ -25,7 +25,7 @@ class PlaylistManager extends EventEmitter {
 
   list() {
     return this.playlists.map(p => ({
-      id: p.id, name: p.name, count: p.items.length, active: p.id === this.activeId
+      id: p.id, name: p.name, count: p.items.length, active: p.id === this.activeId, loop: !!p.loop
     }));
   }
 
@@ -71,6 +71,15 @@ class PlaylistManager extends EventEmitter {
     this.activeId = id;
     this.emit('change');
     return p;
+  }
+
+  /** 循环开关：播完最后一部回卷到第一部（合集条目回卷时抽新集） */
+  setLoop(id, loop) {
+    const p = this.get(id);
+    if (!p) return false;
+    p.loop = !!loop;
+    this.emit('change');
+    return true;
   }
 
   // ---- 非播出中节目单的条目编辑（播出中的走 QueueManager，共享同一数组）----

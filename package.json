@@ -1,6 +1,6 @@
 {
   "name": "showrunner",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Showrunner 放映员 —— 手机编排、电视只读播放的家庭点播系统",
   "main": "src/server.js",
   "scripts": {

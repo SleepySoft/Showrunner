@@ -163,6 +163,35 @@ test('编辑播出中的节目单 = 编辑直播队列（共享数组）', async
   assert.equal(s.queue.length, 3); // 经节目单端点添加，队列同步可见
 });
 
+test('确认式文件选择更新频道并清理历史重复项', async () => {
+  const lib = await (await authed('/api/library')).json();
+  const mediaId = lib.items[0].id;
+  const before = await (await authed(`/api/playlists/${plA.id}`)).json();
+  const kept = before.playlist.items.find(item => item.type === 'local');
+  await post(`/api/playlists/${plA.id}/items/${kept.qid}/timing`, { startTime: '18:30', maxPlaySeconds: 1200 });
+
+  let r = await authed(`/api/playlists/${plA.id}/local-items`, {
+    method: 'PUT', body: JSON.stringify({ mediaIds: [mediaId, mediaId] })
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { added: [], removed: 1, selected: 1 });
+  let detail = await (await authed(`/api/playlists/${plA.id}`)).json();
+  const locals = detail.playlist.items.filter(item => item.type === 'local');
+  assert.equal(locals.length, 1);
+  assert.equal(locals[0].qid, kept.qid);
+  assert.equal(locals[0].startTime, '18:30');
+  assert.equal(locals[0].maxPlaySeconds, 1200);
+  assert.equal((await (await authed('/api/state')).json()).queue.length, 2);
+
+  // 新 ID 必须先全部验证；失败不能先删除现有选择。
+  r = await authed(`/api/playlists/${plA.id}/local-items`, {
+    method: 'PUT', body: JSON.stringify({ mediaIds: ['missing-media'] })
+  });
+  assert.equal(r.status, 404);
+  detail = await (await authed(`/api/playlists/${plA.id}`)).json();
+  assert.equal(detail.playlist.items.filter(item => item.type === 'local').length, 1);
+});
+
 test('删除播出中的节目单：队列清空待机', async () => {
   await post('/api/control', { action: 'play' });
   const res = await authed(`/api/playlists/${plA.id}`, { method: 'DELETE' });

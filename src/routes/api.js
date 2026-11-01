@@ -310,6 +310,15 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
     res.json({ playlist: { id: p.id, name: p.name, active: p.id === playlists.activeId, loop: !!p.loop, items: p.items } });
   });
 
+  function localItem(id) {
+    const item = library.get(id);
+    if (!item) throw { status: 404, error: `media not found: ${id}` };
+    return {
+      type: 'local', mediaId: item.id, title: item.title, relPath: item.relPath,
+      sourceId: item.sourceId, sourceName: item.sourceName
+    };
+  }
+
   /** 构建条目：本地媒体 ID（单个/批量）、网页链接、合集抽一集。错误抛 { status, error }。 */
   async function buildItems(body) {
     const url = body?.url;
@@ -327,14 +336,33 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
     }
     const ids = Array.isArray(body?.mediaIds) ? body.mediaIds : [body?.mediaId];
     if (!ids.length || !ids[0]) throw { status: 400, error: '缺少 mediaId、url 或 collectionId' };
-    return ids.map(id => {
-      const item = library.get(id);
-      if (!item) throw { status: 404, error: `media not found: ${id}` };
-      return {
-        type: 'local', mediaId: item.id, title: item.title, relPath: item.relPath,
-        sourceId: item.sourceId, sourceName: item.sourceName
-      };
-    });
+    return [...new Set(ids.map(String))].map(localItem);
+  }
+
+  /**
+   * 确认式更新本地条目集合：保留仍被选中的原条目及排序/时间配置，
+   * 删除取消选中与历史重复项，新选文件追加到末尾。
+   * 已在容器中但当前片库不可访问的 ID 仍可保留，避免 NAS 暂离线时误删资产。
+   */
+  function replaceLocalItems(container, requestedIds, { remove, add }) {
+    if (!Array.isArray(requestedIds) || requestedIds.length > 10000) {
+      throw { status: 400, error: 'mediaIds 必须是不超过 10000 项的数组' };
+    }
+    const ids = [...new Set(requestedIds.map(id => String(id ?? '')).filter(Boolean))];
+    const desired = new Set(ids);
+    const existingById = new Map();
+    const toRemove = [];
+    for (const item of container.items) {
+      if (item.type !== 'local') continue;
+      const mediaId = String(item.mediaId ?? '');
+      if (!desired.has(mediaId) || existingById.has(mediaId)) toRemove.push(item.qid);
+      else existingById.set(mediaId, item);
+    }
+    // 先验证所有新项，验证失败时不修改现有集合。
+    const additions = ids.filter(id => !existingById.has(id)).map(localItem);
+    for (const qid of toRemove) remove(qid);
+    const added = additions.map(add);
+    return { added, removed: toRemove.length, selected: ids.length };
   }
 
   /** 向指定节目单添加条目（播出中的走队列状态机） */
@@ -349,6 +377,19 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
       ? items.map(it => queue.add(it))       // 播出中：走队列，电视实时收到
       : items.map(it => playlists.addItem(p.id, it)); // 非播出中：直接编辑
     res.status(201).json({ added });
+  });
+
+  router.put('/playlists/:id/local-items', (req, res) => {
+    const p = playlists.get(req.params.id);
+    if (!p) return res.status(404).json({ error: 'not found' });
+    try {
+      const active = p.id === playlists.activeId;
+      const result = replaceLocalItems(p, req.body?.mediaIds, {
+        remove: qid => active ? queue.remove(qid) : playlists.removeItem(p.id, qid),
+        add: item => active ? queue.add(item) : playlists.addItem(p.id, item)
+      });
+      res.json(result);
+    } catch (e) { res.status(e.status || 500).json({ error: e.error || 'failed' }); }
   });
 
   router.delete('/playlists/:id/items/:qid', (req, res) => {
@@ -483,6 +524,18 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
       return res.status(400).json({ error: '合集不能嵌套合集' });
     }
     res.status(201).json({ added: items.map(it => collections.addItem(c.id, it)) });
+  });
+
+  router.put('/collections/:id/local-items', (req, res) => {
+    const c = collections.get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    try {
+      const result = replaceLocalItems(c, req.body?.mediaIds, {
+        remove: qid => collections.removeItem(c.id, qid),
+        add: item => collections.addItem(c.id, item)
+      });
+      res.json(result);
+    } catch (e) { res.status(e.status || 500).json({ error: e.error || 'failed' }); }
   });
 
   router.delete('/collections/:id/items/:qid', (req, res) => {

@@ -99,6 +99,7 @@
     display: flex; align-items: center; gap: 8px; min-height: 42px;
     margin-left: 28px; padding: 6px 4px; border-bottom: 1px solid var(--line);
   }
+  .media-tree .tree-file.selected { background: rgba(37, 99, 235, .10); }
   .media-tree .tree-file .tree-name { flex: 1; min-width: 0; }
   .media-tree .tree-file .tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .media-tree .tree-file .tree-meta { color: var(--sub); font-size: 11px; margin-top: 2px; }
@@ -482,7 +483,8 @@
       </div>
     </div>
     <div class="sheet-foot">
-      <button id="addClose" class="primary">完成</button>
+      <button id="addCancel">放弃文件选择</button>
+      <button id="addClose" class="primary">确认</button>
     </div>
   </div>
 </div>
@@ -506,7 +508,8 @@
       <button id="btnColRename">修改名称</button>
       <button id="btnColMode">切换为随机抽</button>
       <button id="btnColReset">重置进度</button>
-      <button id="colClose" class="primary">完成</button>
+      <button id="colCancel">放弃未确认选择</button>
+      <button id="colClose" class="primary">确认并完成</button>
     </div>
   </div>
 </div>
@@ -938,14 +941,13 @@ $('btnAddItem').onclick = async () => {
   const cur = playlists.find(p => p.id === selectedPlId);
   if (!cur) { alert('先创建一个频道'); return; }
   $('addTarget').textContent = cur.name + (cur.active ? '（播出中）' : '');
-  $('addClose').textContent = '完成';
+  $('addClose').textContent = '确认';
   $('addModal').classList.add('show');
   await renderPickList();
   renderColPickList();
 };
 $('addClose').onclick = async () => {
-  // “完成”符合用户对确认按钮的预期：若片库还有勾选，先加入，成功后再退出。
-  if (channelMediaPicker?.hasSelection()) {
+  if (channelMediaPicker?.hasChanges()) {
     $('addClose').disabled = true;
     const ok = await channelMediaPicker.commit();
     $('addClose').disabled = false;
@@ -953,6 +955,10 @@ $('addClose').onclick = async () => {
   }
   $('addModal').classList.remove('show');
   await refreshPlaylists();
+};
+$('addCancel').onclick = () => {
+  channelMediaPicker = null;
+  $('addModal').classList.remove('show');
 };
 $('addTabLink').onclick = () => switchAddPane('link');
 $('addTabLocal').onclick = () => switchAddPane('local');
@@ -985,14 +991,18 @@ async function addLink() {
 }
 
 async function renderPickList() {
+  const target = await api(`/playlists/${selectedPlId}`);
   const r = await api('/library');
   const box = $('pickList');
+  const currentIds = target.playlist.items.filter(item => item.type === 'local').map(item => item.mediaId);
   channelMediaPicker = renderMediaTree(box, r.items, {
     selectable: true,
-    actionLabel: '加入频道',
+    initialSelected: currentIds,
     emptyText: '片库为空\n先去「片库」页添加媒体目录',
-    onAdd: ids => addToSelected({ mediaIds: ids }),
-    onSelectionChange: count => { $('addClose').textContent = count ? `加入 ${count} 项并完成` : '完成'; }
+    onCommit: ids => api(`/playlists/${selectedPlId}/local-items`, { method: 'PUT', body: { mediaIds: ids } }),
+    onSelectionChange: (count, changed) => {
+      $('addClose').textContent = changed ? `确认更新（${count} 个文件）` : '确认';
+    }
   });
 }
 
@@ -1016,17 +1026,15 @@ function buildMediaTree(items) {
 /** 通用片库树：主片库用于浏览，加入弹窗额外支持勾选文件/整目录。 */
 function renderMediaTree(container, items, options = {}) {
   container.innerHTML = '';
-  if (!items.length) {
-    container.innerHTML = `<div class="empty">${esc(options.emptyText || '片库为空').replace(/\n/g, '<br>')}</div>`;
-    options.onSelectionChange?.(0);
-    return { hasSelection: () => false, commit: async () => true };
-  }
   const tree = buildMediaTree(items);
-  const selected = new Set();
+  const initial = new Set((options.initialSelected || []).map(String));
+  const selected = new Set(initial);
   const dirChecks = [];
   const wrapper = document.createElement('div');
   wrapper.className = 'media-tree';
-  let addBtn = null, selectedLabel = null;
+  let selectedLabel = null;
+
+  const hasChanges = () => selected.size !== initial.size || [...selected].some(id => !initial.has(id));
 
   const descendantIds = node => [
     ...node.files.map(f => f.id),
@@ -1034,39 +1042,45 @@ function renderMediaTree(container, items, options = {}) {
   ];
   const sortedDirs = node => [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
   const refreshChecks = () => {
-    wrapper.querySelectorAll('input[data-file-id]').forEach(input => { input.checked = selected.has(input.dataset.fileId); });
+    wrapper.querySelectorAll('input[data-file-id]').forEach(input => {
+      input.checked = selected.has(input.dataset.fileId);
+      input.closest('.tree-file')?.classList.toggle('selected', input.checked);
+    });
     for (const d of dirChecks) {
       const count = d.ids.filter(id => selected.has(id)).length;
       d.input.checked = count === d.ids.length && count > 0;
       d.input.indeterminate = count > 0 && count < d.ids.length;
     }
-    if (selectedLabel) selectedLabel.textContent = `已选择 ${selected.size} 个文件`;
-    if (addBtn) addBtn.disabled = selected.size === 0;
-    options.onSelectionChange?.(selected.size);
+    if (selectedLabel) selectedLabel.textContent = `当前选中 ${selected.size} 个文件${hasChanges() ? '（待确认）' : ''}`;
+    options.onSelectionChange?.(selected.size, hasChanges());
   };
 
   const commitSelected = async () => {
-    if (!selected.size) return true;
-    addBtn.disabled = true; addBtn.textContent = '正在加入…';
+    if (!hasChanges()) return true;
     try {
-      await options.onAdd([...selected]);
-      selected.clear(); refreshChecks();
-      addBtn.textContent = '已加入';
-      setTimeout(() => { if (addBtn.isConnected) addBtn.textContent = options.actionLabel || '加入已选'; }, 1000);
+      await options.onCommit([...selected]);
+      initial.clear();
+      for (const id of selected) initial.add(id);
+      refreshChecks();
       return true;
     } catch (e) {
-      alert('添加失败：' + e.message);
-      addBtn.textContent = options.actionLabel || '加入已选'; refreshChecks();
+      alert('更新失败：' + e.message);
+      refreshChecks();
       return false;
     }
   };
 
   if (options.selectable) {
     const bar = document.createElement('div'); bar.className = 'tree-selectbar';
-    selectedLabel = document.createElement('span'); selectedLabel.textContent = '已选择 0 个文件';
-    addBtn = document.createElement('button'); addBtn.textContent = options.actionLabel || '加入已选'; addBtn.disabled = true;
-    addBtn.onclick = commitSelected;
-    bar.append(selectedLabel, addBtn); container.appendChild(bar);
+    selectedLabel = document.createElement('span'); selectedLabel.textContent = '当前选中 0 个文件';
+    const hint = document.createElement('span'); hint.textContent = '已加入的文件会预先勾选；增减只在确认后生效';
+    bar.append(selectedLabel, hint); container.appendChild(bar);
+  }
+
+  if (!items.length) {
+    const empty = document.createElement('div'); empty.className = 'empty';
+    empty.innerHTML = esc(options.emptyText || '片库为空').replace(/\n/g, '<br>');
+    container.appendChild(empty);
   }
 
   const renderDir = (node, depth = 0) => {
@@ -1106,7 +1120,13 @@ function renderMediaTree(container, items, options = {}) {
   for (const source of sortedDirs(tree)) wrapper.appendChild(renderDir(source));
   container.appendChild(wrapper);
   refreshChecks();
-  return { hasSelection: () => selected.size > 0, commit: commitSelected };
+  return {
+    hasSelection: () => selected.size > 0,
+    hasChanges,
+    selectedIds: () => [...selected],
+    setSelected: (id, value) => { value ? selected.add(String(id)) : selected.delete(String(id)); refreshChecks(); },
+    commit: commitSelected
+  };
 }
 
 // 合集抽一集：挑选合集
@@ -1189,12 +1209,14 @@ $('btnColImport').onclick = async () => {
 
 async function openColModal(id) {
   editingColId = id;
-  $('colClose').textContent = '完成';
+  collectionMediaPicker = null;
+  $('colClose').textContent = '确认并完成';
   $('colModal').classList.add('show');
   await renderColModal();
 }
 
 async function renderColModal() {
+  const pendingLocalIds = collectionMediaPicker?.selectedIds();
   const r = await api('/collections/' + editingColId);
   const c = r.collection;
   $('colName').textContent = c.name;
@@ -1216,7 +1238,11 @@ async function renderColModal() {
     };
     mk('↑', '上移', async () => { if (i > 0) { await api(`/collections/${c.id}/items/move`, { method: 'POST', body: { qid: it.qid, toIndex: i - 1 } }); await renderColModal(); await refreshCollectionsOnly(); } });
     mk('↓', '下移', async () => { if (i < c.items.length - 1) { await api(`/collections/${c.id}/items/move`, { method: 'POST', body: { qid: it.qid, toIndex: i + 1 } }); await renderColModal(); await refreshCollectionsOnly(); } });
-    mk('✕', '移除', async () => { await api(`/collections/${c.id}/items/${it.qid}`, { method: 'DELETE' }); await renderColModal(); await refreshCollectionsOnly(); }, 'del');
+    mk('✕', '移除', async () => {
+      if (it.type === 'local') collectionMediaPicker?.setSelected(it.mediaId, false);
+      await api(`/collections/${c.id}/items/${it.qid}`, { method: 'DELETE' });
+      await renderColModal(); await refreshCollectionsOnly();
+    }, 'del');
     box.appendChild(div);
   });
 
@@ -1225,13 +1251,12 @@ async function renderColModal() {
   const pick = $('colPickLocal');
   collectionMediaPicker = renderMediaTree(pick, lib.items, {
     selectable: true,
-    actionLabel: '加入合集',
+    initialSelected: pendingLocalIds || c.items.filter(item => item.type === 'local').map(item => item.mediaId),
     emptyText: '片库为空',
-    onAdd: async ids => {
-      await api(`/collections/${c.id}/items`, { method: 'POST', body: { mediaIds: ids } });
-      await renderColModal(); await refreshCollectionsOnly();
-    },
-    onSelectionChange: count => { $('colClose').textContent = count ? `加入 ${count} 项并完成` : '完成'; }
+    onCommit: ids => api(`/collections/${c.id}/local-items`, { method: 'PUT', body: { mediaIds: ids } }),
+    onSelectionChange: (count, changed) => {
+      $('colClose').textContent = changed ? `确认更新（${count} 个文件）` : '确认并完成';
+    }
   });
 }
 
@@ -1267,14 +1292,19 @@ $('btnColReset').onclick = async () => {
   await renderColModal(); await refreshCollectionsOnly();
 };
 $('colClose').onclick = async () => {
-  if (collectionMediaPicker?.hasSelection()) {
+  if (collectionMediaPicker?.hasChanges()) {
     $('colClose').disabled = true;
     const ok = await collectionMediaPicker.commit();
     $('colClose').disabled = false;
     if (!ok) return;
   }
   $('colModal').classList.remove('show');
+  collectionMediaPicker = null;
   await refreshCollectionsOnly();
+};
+$('colCancel').onclick = () => {
+  collectionMediaPicker = null;
+  $('colModal').classList.remove('show');
 };
 
 // ---------- 时刻表 ----------

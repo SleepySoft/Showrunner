@@ -182,6 +182,15 @@ Base URL：`http://<电脑IP>:7100`
 
 播出中节目单的添加会实时推送到电视端。
 
+### `PUT /api/playlists/:id/local-items`
+
+```json
+// 请求 { "mediaIds": ["当前确认保留的全部本地媒体 ID", "..."] }
+// 200 { "added": [...], "removed": 2, "selected": 12 }
+```
+
+确认式更新频道中的本地文件集合。仍被选中的原条目会保留 `qid`、顺序和播放时间配置；取消选择的条目与历史重复项会删除，新选择追加到末尾。网页与合集条目不受影响。所有新 ID 会先验证，任一无效则整体不修改。
+
 ### `DELETE /api/playlists/:id/items/:qid` · `POST /api/playlists/:id/items/move`
 
 ```json
@@ -233,6 +242,10 @@ Base URL：`http://<电脑IP>:7100`
 ### `POST /api/collections/:id/items`
 
 请求体同节目单 items（mediaId / mediaIds / url），**禁止嵌套合集**（collectionId 返回 400）。
+
+### `PUT /api/collections/:id/local-items`
+
+请求与响应同频道的 `local-items` 接口，用确认后的完整 `mediaIds` 集合增减合集中的本地文件；网页条目不受影响，既有条目及其顺序会尽量保留。
 
 ### `DELETE /api/collections/:id/items/:qid` · `POST /api/collections/:id/items/move`
 
@@ -299,7 +312,7 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 
 `rescan=1` 重新扫描磁盘。条目按路径本地化排序，不暴露绝对路径。
 
-`sourceId/sourceName` 标识片库根目录，前端据此构建「根目录 → 子目录 → 文件」树。批量勾选目录后，将所有后代文件 ID 通过已有的 `mediaIds` 数组加入频道或合集。
+`sourceId/sourceName` 标识片库根目录，前端据此构建「根目录 → 子目录 → 文件」树。频道和合集浏览器以现有本地条目作为初始勾选，用户增减选择后通过对应的 `PUT .../local-items` 一次确认；关闭或放弃不会发送更新，重复确认不会产生重复条目。
 
 ### `GET /api/dirs` / `POST /api/dirs` / `DELETE /api/dirs`
 

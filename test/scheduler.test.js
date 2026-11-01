@@ -161,6 +161,34 @@ test('合集：创建 → 加两集 → 禁止嵌套', async () => {
   assert.equal(nest.status, 400);
 });
 
+test('确认式文件选择按勾选结果更新合集', async () => {
+  const lib = await (await authed('/api/library')).json();
+  const ids = lib.items.map(item => item.id);
+  const original = await (await authed(`/api/collections/${collectionId}`)).json();
+  const first = original.collection.items.find(item => item.mediaId === ids[0]);
+
+  // 模拟旧界面造成的重复加入；确认时应保留首个条目并清掉重复。
+  await post(`/api/collections/${collectionId}/items`, { mediaId: ids[0] });
+  let r = await authed(`/api/collections/${collectionId}/local-items`, {
+    method: 'PUT', body: JSON.stringify({ mediaIds: [ids[0]] })
+  });
+  assert.equal(r.status, 200);
+  let body = await r.json();
+  assert.equal(body.removed, 2);
+  let detail = await (await authed(`/api/collections/${collectionId}`)).json();
+  assert.deepEqual(detail.collection.items.map(item => item.mediaId), [ids[0]]);
+  assert.equal(detail.collection.items[0].qid, first.qid);
+
+  // 再次勾选第二集只新增缺少项；最后还原两集供后续播放测试使用。
+  r = await authed(`/api/collections/${collectionId}/local-items`, {
+    method: 'PUT', body: JSON.stringify({ mediaIds: ids })
+  });
+  body = await r.json();
+  assert.equal(body.added.length, 1);
+  detail = await (await authed(`/api/collections/${collectionId}`)).json();
+  assert.deepEqual(detail.collection.items.map(item => item.mediaId), ids);
+});
+
 test('合集创建后可改名，并同步频道里的合集条目名称', async () => {
   const created = await (await post('/api/collections', {})).json();
   assert.equal(created.collection.name, '新合集');

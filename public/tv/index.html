@@ -79,7 +79,7 @@
   <div class="safe">配对码只在这台电视上显示，设置完成后立即失效</div>
 </div>
 <div id="channelControls"></div>
-<div id="vodPanel"><h2 id="vodTitle">选择节目</h2><div class="hint">↑↓ 选择　← 确认　→ 返回</div><div id="vodItems"></div><button id="vodClose">返回频道</button></div>
+<div id="vodPanel"><h2 id="vodTitle">选择节目</h2><div class="hint">方向键选择　左键 / Enter 确认　右键返回</div><div id="vodItems"></div><button id="vodClose">返回频道</button></div>
 <script>
 'use strict';
 /*
@@ -109,8 +109,11 @@ async function refreshFirstSetup() {
 refreshFirstSetup();
 setInterval(refreshFirstSetup, 2000);
 
-// 浏览器右键菜单和双击全屏由 kiosk 接管；键盘只拦截下方明确支持的导航键。
-window.addEventListener('contextmenu', e => e.preventDefault(), { capture: true });
+// 浏览器右键菜单和双击全屏由 kiosk 接管；右键作为遥控器的菜单/返回键。
+window.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!$('firstSetup').classList.contains('show')) remoteMenuKey();
+}, { capture: true });
 window.addEventListener('dblclick', e => e.preventDefault(), { capture: true });
 video.controls = false;
 video.disablePictureInPicture = true;
@@ -314,7 +317,7 @@ function renderChannelControls(s) {
   const selected = channels.find(c => c.id === s.selectedChannelId);
   const previous = box.querySelector('button.focused');
   const previousKey = previous?.dataset.channelId ? `channel:${previous.dataset.channelId}` : previous?.dataset.action || null;
-  box.innerHTML = '<h2>频道</h2><div class="hint">↑↓ 选择　← 确认　→ 关闭</div>';
+  box.innerHTML = '<h2>频道</h2><div class="hint">方向键选择　左键 / Enter 确认　右键关闭</div>';
   channels.forEach(c => {
     const b = document.createElement('button');
     b.textContent = `${c.selected ? '正在播放　' : ''}${c.name}`;
@@ -324,6 +327,7 @@ function renderChannelControls(s) {
       if (c.id !== lastState?.selectedChannelId) ws?.send(JSON.stringify({ type: 'selectChannel', channelId: c.id }));
       closeRemoteMenus();
     };
+    b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
     box.appendChild(b);
   });
   if (selected?.allowOnDemand) {
@@ -331,6 +335,7 @@ function renderChannelControls(s) {
     b.textContent = `浏览「${selected.name}」节目`;
     b.dataset.action = 'vod';
     b.onclick = () => openVod(selected);
+    b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
     box.appendChild(b);
   }
   if (remoteLayer === 'channels') {
@@ -351,6 +356,7 @@ function openVod(channel) {
   (channel.items || []).forEach(item => {
     const b = document.createElement('button'); b.textContent = item.title;
     b.onclick = () => { ws?.send(JSON.stringify({ type: 'onDemand', qid: item.qid })); closeRemoteMenus(); };
+    b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
     items.appendChild(b);
   });
   $('channelControls').classList.remove('show');
@@ -400,34 +406,30 @@ function remoteMenuKey() {
 
 $('vodClose').onclick = () => openChannelMenu();
 
-// 最小共同按键：上下移动、左确认、右菜单/返回。Enter/Escape 等仅作键盘兼容别名。
+// 最小共同按键：鼠标右键菜单/返回，左键点击确认；四个方向键移动，Enter 也可确认。
 window.addEventListener('keydown', event => {
   const key = event.key;
-  const isUp = key === 'ArrowUp';
-  const isDown = key === 'ArrowDown';
-  const isConfirm = key === 'ArrowLeft' || key === 'Enter' || key === 'OK' || key === 'Select';
-  const isMenu = key === 'ArrowRight' || key === 'Escape' || key === 'ContextMenu' || key === 'BrowserBack' || key === 'Back';
-  if (!isUp && !isDown && !isConfirm && !isMenu) return; // 音量、电源等系统键不拦截
+  const isPrevious = key === 'ArrowUp' || key === 'ArrowLeft';
+  const isNext = key === 'ArrowDown' || key === 'ArrowRight';
+  const isConfirm = key === 'Enter' || key === 'OK' || key === 'Select';
+  const isMenu = key === 'Escape' || key === 'ContextMenu' || key === 'BrowserBack' || key === 'Back';
+  if (!isPrevious && !isNext && !isConfirm && !isMenu) return; // 音量、电源等系统键不拦截
   event.preventDefault(); event.stopPropagation();
   if (isMenu) { remoteMenuKey(); return; }
   if (remoteLayer === 'closed') {
     if (isConfirm) return;
     openChannelMenu();
   }
-  if (isUp || isDown) setRemoteFocus(remoteFocus + (isDown ? 1 : -1));
+  if (isPrevious || isNext) setRemoteFocus(remoteFocus + (isNext ? 1 : -1));
   else menuButtons()[remoteFocus]?.click();
 }, { capture: true });
 
-window.addEventListener('mousemove', () => {
-  const channels = lastState?.channels || [];
-  const selected = channels.find(c => c.id === lastState?.selectedChannelId);
-  if (channels.length <= 1 && selected && !selected.allowOnDemand) return;
-  if (remoteLayer === 'closed') openChannelMenu();
-  clearTimeout(controlsTimer);
-  controlsTimer = setTimeout(() => {
-    if (remoteLayer === 'channels') closeRemoteMenus();
-  }, 5000);
-});
+// 左键点菜单外等同取消。鼠标移动本身不再打开菜单，避免菜单刚关又被立即唤回。
+window.addEventListener('click', event => {
+  if (remoteLayer === 'closed') return;
+  if ($('channelControls').contains(event.target) || $('vodPanel').contains(event.target)) return;
+  closeRemoteMenus();
+}, { capture: true });
 </script>
 </body>
 </html>

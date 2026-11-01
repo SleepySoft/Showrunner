@@ -342,10 +342,12 @@ test('电视端与遥控器页面可访问', async () => {
   const tvRes = await fetch(base + '/tv/');
   assert.equal(tvRes.status, 200);
   const tvHtml = await tvRes.text();
-  assert.match(tvHtml, /key === 'ArrowUp'/);
-  assert.match(tvHtml, /key === 'ArrowDown'/);
-  assert.match(tvHtml, /key === 'ArrowLeft'.*'Enter'.*'OK'/s);
-  assert.match(tvHtml, /key === 'ArrowRight'.*'ContextMenu'.*'BrowserBack'/s);
+  assert.match(tvHtml, /key === 'ArrowUp'.*key === 'ArrowLeft'/s);
+  assert.match(tvHtml, /key === 'ArrowDown'.*key === 'ArrowRight'/s);
+  assert.match(tvHtml, /key === 'Enter'.*key === 'OK'/s);
+  assert.match(tvHtml, /contextmenu[\s\S]*remoteMenuKey\(\)/);
+  assert.match(tvHtml, /菜单外等同取消/);
+  assert.doesNotMatch(tvHtml, /addEventListener\('mousemove'/);
   assert.match(tvHtml, /音量、电源等系统键不拦截/);
   assert.equal((await fetch(base + '/remote/')).status, 200);
   assert.equal((await fetch(base + '/')).status, 200); // 重定向跟随

@@ -13,7 +13,9 @@
 npm test
 ```
 
-测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 167 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 168 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+
+`test/dev.test.js` 断言开发入口只绑定 loopback，数据与资产落在 `.dev/`，不托管浏览器、不操作开机启动、默认关闭真实缓存，并验证环境变量覆盖与调试密码持久化。
 
 资产测试覆盖：带版本无损格式、运行态剥离、安装目录内外双保险库、内容去重与滚动历史、实时 JSON 损坏后的 `.bak` 恢复/隔离、无备份时拒绝空数据启动，以及 HTTP 导出后删除再完整恢复。
 

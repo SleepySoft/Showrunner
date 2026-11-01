@@ -8,6 +8,7 @@ data/
 cache/
 config.json
 .smoke-tmp/
+.dev/
 .idea/
 
 # 打包产物

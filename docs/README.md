@@ -31,6 +31,7 @@ Showrunner 要解决的不是“如何限制一个普通播放器”，而是“
 | 目标 | 文档 |
 |---|---|
 | 安装、打包、开机启动、维护和公网反代 | [部署指南](DEPLOY.md) |
+| 非 kiosk 联调、断点、DevTools 和日志定位 | [调试指南](DEBUGGING.md) |
 | 调用 REST / WebSocket 接口 | [API 参考](API.md) |
 | 运行测试、理解覆盖范围 | [测试说明](TESTING.md) |
 | 新增 B 站之外的网站兼容层 | [网站源适配器](SOURCES.md) |

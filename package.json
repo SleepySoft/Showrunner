@@ -5,8 +5,11 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node src/server.js",
+    "dev": "node --watch scripts/dev.js",
+    "dev:once": "node scripts/dev.js",
+    "dev:inspect": "node --inspect --watch scripts/dev.js",
     "test": "node --test \"test/*.test.js\"",
+    "test:watch": "node --test --watch \"test/*.test.js\"",
     "smoke": "node smoke.js"
   },
   "license": "MIT",

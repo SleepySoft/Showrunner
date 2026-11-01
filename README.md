@@ -29,6 +29,8 @@ npm start
 
 > **两种分发方式**：开发者 `git clone`（纯代码，无二进制）→ `scripts\install.bat` 自动补齐环境；用户直接用打包好的 `showrunner-portable-*.zip`（含便携 Node + 全部工具），解压双击 `start.bat` 即用。打新包：`scripts\package.bat`（含自启动验证）。详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
+开发调试不要运行 kiosk：使用 `npm run dev` 启动隔离环境，然后在普通 Chrome 中打开 `http://127.0.0.1:7101/remote/` 和 `/tv/`，默认密码为 `showrunner-dev`。调试数据全部位于 `.dev/`，不会污染正式频道和资产；断点、环境变量与 DevTools 用法见 [调试指南](docs/DEBUGGING.md)。
+
 首次启动时，电视画面会显示 6 位一次性配对码和手机遥控器地址。用手机打开地址，输入配对码并直接设置自己的长期密码。配对码不写盘、重启即更换、设置完成立即失效；`config.json` 只保存长期密码的 scrypt 哈希。
 
 从旧版升级时，如果此前是自动生成但未能看到的初始密码，电视会要求重新配对一次；频道、合集和其他资产不受影响。
@@ -156,8 +158,8 @@ showrunner/
 │   ├── yt-dlp.exe     # 内置 yt-dlp（网页片源下载，不入库，install 自动下载）
 │   └── ffmpeg.exe     # 内置 ffmpeg（音视频合并，不入库，install 自动下载）
 ├── scripts/           # 部署脚本：install / package / autostart / update-tools
-├── test/              # 130+ 个测试：单元 + 端到端
-└── docs/              # 架构 / API / 测试 / 部署文档
+├── test/              # 168 个测试：单元 + 端到端
+└── docs/              # 架构 / API / 调试 / 测试 / 部署文档
 ```
 
 ## 路线图

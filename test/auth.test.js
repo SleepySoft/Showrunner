@@ -20,17 +20,33 @@ test('scrypt 密码哈希可校验，改密会撤销旧会话', () => {
   assert.equal(auth.verifyPassword('new-password'), true);
 });
 
-test('首次启动只保存密码哈希，后续可从哈希登录', () => {
+test('未配置鉴权时拒绝空密码登录', () => {
+  const auth = new Auth(null, 1, null);
+  assert.equal(auth.isConfigured(), false);
+  assert.equal(auth.verifyPassword(''), false);
+  assert.equal(auth.login(''), null);
+});
+
+test('首次启动生成临时配对码，配对前不写永久密码', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-config-'));
   try {
     const first = loadConfig(root, ['node', 'test'], {});
-    assert.equal(first.generatedPassword, true);
-    assert.ok(first.password);
-    const disk = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
-    assert.equal(disk.password, undefined);
-    assert.match(disk.passwordHash, /^scrypt\$/);
+    assert.equal(first.setupRequired, true);
+    assert.match(first.setupCode, /^\d{6}$/);
+    assert.equal(fs.existsSync(path.join(root, 'config.json')), false);
+
+    const hash = Auth.hashPassword('chosen-password');
+    savePasswordHash(path.join(root, 'config.json'), hash);
     const second = loadConfig(root, ['node', 'test'], {});
-    assert.equal(new Auth(null, 1, second.passwordHash).verifyPassword(first.password), true);
+    assert.equal(second.setupRequired, false);
+    assert.equal(second.setupCode, undefined);
+    assert.equal(new Auth(null, 1, second.passwordHash).verifyPassword('chosen-password'), true);
+
+    fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify({ passwordHash: hash }));
+    const legacy = loadConfig(root, ['node', 'test'], {});
+    assert.equal(legacy.setupRequired, true);
+    assert.equal(legacy.legacyPasswordNeedsPairing, true);
+    assert.equal(legacy.passwordHash, null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -44,7 +60,7 @@ test('保存新密码哈希时保留其他配置并移除旧明文密码', () =>
     const hash = Auth.hashPassword('replacement');
     savePasswordHash(file, hash);
     const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.deepEqual(disk, { port: 7200, passwordHash: hash });
+    assert.deepEqual(disk, { port: 7200, passwordHash: hash, passwordSetupVersion: 1 });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

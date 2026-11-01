@@ -2,7 +2,7 @@
 /**
  * 遥控器 API：登录、片库、目录管理、文件浏览、节目单管理、合集、时刻表、
  * 队列、播放控制、缓存管理、节目表导出。
- * 除 /login 外全部需要会话。
+ * 除首次配对与 /login 外全部需要会话。
  * 节目单与队列的关系：播出中节目单的 items 与 QueueManager.queue 共享同一数组——
  * 编辑播出中的节目单 = 编辑直播队列；编辑其他节目单不影响播出。
  */
@@ -17,17 +17,51 @@ const { createAssetDocument, validateAssetDocument } = require('../assets');
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function apiRouter({ auth, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
+function apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
   const router = express.Router();
   router.use(express.json({ limit: '10mb' }));
 
   const loginFailures = new Map();
+  const setupFailures = new Map();
   const cookieFor = (req, token, maxAge = 7 * 24 * 3600) => {
     const secure = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
     return `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
   };
 
+  router.get('/setup/status', (req, res) => {
+    res.json({ required: !!setup?.required });
+  });
+
+  router.post('/setup', (req, res) => {
+    if (!setup?.required) return res.status(409).json({ error: '首次配对已经完成' });
+    const key = req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const attempt = setupFailures.get(key);
+    if (attempt?.blockedUntil > now) return res.status(429).json({ error: '尝试过多，请稍后再试' });
+    const supplied = Buffer.from(String(req.body?.code ?? ''));
+    const expected = Buffer.from(String(setup.code ?? ''));
+    const codeMatches = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+    if (!codeMatches) {
+      const failures = (attempt?.failures || 0) + 1;
+      setupFailures.set(key, { failures, blockedUntil: failures >= 5 ? now + 15 * 60000 : 0 });
+      return res.status(403).json({ error: '配对码不正确' });
+    }
+    const next = String(req.body?.newPassword ?? '');
+    if (next.length < 8 || next.length > 128) return res.status(400).json({ error: '密码长度需为 8-128 个字符' });
+    const hash = Auth.hashPassword(next);
+    try { if (onPasswordChange) onPasswordChange(hash); }
+    catch (e) { return res.status(500).json({ error: '密码保存失败：' + e.message }); }
+    auth.setPasswordHash(hash);
+    setup.required = false;
+    setup.code = null;
+    setupFailures.clear();
+    const token = auth.createSession();
+    res.setHeader('Set-Cookie', cookieFor(req, token));
+    res.json({ ok: true, token });
+  });
+
   router.post('/login', (req, res) => {
+    if (setup?.required) return res.status(409).json({ error: 'setup_required' });
     const key = req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const attempt = loginFailures.get(key);

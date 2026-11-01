@@ -1,7 +1,7 @@
 'use strict';
 /**
  * 配置加载：config.json（可选） + 环境变量 + 命令行参数，优先级从低到高。
- * 首次启动若无密码，自动生成随机密码写入 config.json 并打印到控制台。
+ * 首次启动若无密码，进入一次性电视配对流程；配对成功后才保存长期密码哈希。
  */
 const fs = require('fs');
 const path = require('path');
@@ -13,7 +13,7 @@ const DEFAULTS = {
   mediaDirs: [],          // 本地媒体库目录列表
   dataFile: null,         // 默认 <root>/data/showrunner.json
   password: null,         // 遥控器登录密码
-  passwordHash: null,     // 修改密码/新安装后使用 scrypt 哈希持久化
+  passwordHash: null,     // 首次配对/修改密码后使用 scrypt 哈希持久化
   sessionTtlHours: 720,   // 会话有效期，默认 30 天
   ytdlpPath: null,        // yt-dlp 可执行文件路径（默认自动查找 PATH / bin/）
   cookiesFromBrowser: null, // 网页片源下载时借用哪个浏览器的登录态，如 "chrome"、"edge"
@@ -56,14 +56,16 @@ function loadConfig(rootDir, argv = process.argv, env = process.env) {
   if (env.SHOWRUNNER_PASSWORD) cfg.password = env.SHOWRUNNER_PASSWORD;
   if (env.PORT) cfg.port = Number(env.PORT);
 
-  // 首次启动：生成随机密码并持久化
-  if (!cfg.password && !cfg.passwordHash) {
-    cfg.password = crypto.randomBytes(4).toString('hex');
-    const { Auth } = require('./auth');
-    fileCfg.passwordHash = Auth.hashPassword(cfg.password);
-    delete fileCfg.password;
-    try { fs.writeFileSync(cfgFile, JSON.stringify(fileCfg, null, 2)); } catch { /* 只读目录则仅打印 */ }
-    cfg.generatedPassword = true;
+  // 首次启动：只生成本进程有效的配对码，不预先写入一个用户看不到的永久密码。
+  // 旧版本自动生成的哈希没有 passwordSetupVersion，无法判断用户是否见过密码；升级后重新配对一次。
+  const passwordHashReady = !!cfg.passwordHash && Number(fileCfg.passwordSetupVersion || 0) >= 1;
+  if (!cfg.password && !passwordHashReady) {
+    cfg.setupRequired = true;
+    cfg.setupCode = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    cfg.legacyPasswordNeedsPairing = !!cfg.passwordHash;
+    cfg.passwordHash = null;
+  } else {
+    cfg.setupRequired = false;
   }
 
   if (!cfg.dataFile) cfg.dataFile = path.join(rootDir, 'data', 'showrunner.json');
@@ -78,6 +80,7 @@ function savePasswordHash(cfgFile, passwordHash) {
   let data = {};
   try { data = JSON.parse(fs.readFileSync(cfgFile, 'utf8').replace(/^﻿/, '')); } catch {}
   data.passwordHash = passwordHash;
+  data.passwordSetupVersion = 1;
   delete data.password;
   const tmp = cfgFile + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2));

@@ -233,16 +233,29 @@
     border: none; border-radius: 10px; background: var(--text); color: var(--bg); cursor: pointer;
   }
   #login .err { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
+  #setupPane { display: none; width: 100%; max-width: 340px; }
+  #setupPane.show { display: block; }
+  #setupCodeInput { letter-spacing: 8px; font-family: monospace; font-size: 24px !important; }
 </style>
 </head>
 <body>
 
 <div id="login">
   <h1>📺 Showrunner</h1>
-  <p>家庭点播 · 家长遥控器</p>
-  <input id="pwd" type="password" placeholder="遥控器密码" autocomplete="current-password">
-  <button id="loginBtn">进入</button>
-  <div class="err" id="loginErr"></div>
+  <div id="loginPane">
+    <p>家庭点播 · 家长遥控器</p>
+    <input id="pwd" type="password" placeholder="遥控器密码" autocomplete="current-password">
+    <button id="loginBtn">进入</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+  <div id="setupPane">
+    <p>首次运行：请输入电视画面上的 6 位配对码，并设置以后使用的遥控器密码。</p>
+    <input id="setupCodeInput" type="text" inputmode="numeric" maxlength="6" placeholder="配对码" autocomplete="one-time-code">
+    <input id="setupPassword" type="password" placeholder="新密码（至少 8 个字符）" autocomplete="new-password">
+    <input id="setupPasswordConfirm" type="password" placeholder="再次输入新密码" autocomplete="new-password">
+    <button id="setupBtn">完成首次设置</button>
+    <div class="err" id="setupErr"></div>
+  </div>
 </div>
 
 <header>
@@ -482,7 +495,11 @@ async function api(path, opts = {}) {
 }
 
 // ---------- 登录 ----------
-function showLogin() { $('login').classList.remove('hidden'); }
+function showLogin(firstSetup = false) {
+  $('login').classList.remove('hidden');
+  $('loginPane').style.display = firstSetup ? 'none' : '';
+  $('setupPane').classList.toggle('show', firstSetup);
+}
 function hideLogin() { $('login').classList.add('hidden'); }
 
 $('loginBtn').onclick = async () => {
@@ -495,6 +512,23 @@ $('loginBtn').onclick = async () => {
   } catch { $('loginErr').textContent = '密码不对，再试一次'; }
 };
 $('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+$('setupBtn').onclick = async () => {
+  const code = $('setupCodeInput').value.trim();
+  const newPassword = $('setupPassword').value;
+  if (!/^\d{6}$/.test(code)) { $('setupErr').textContent = '请输入电视上的 6 位配对码'; return; }
+  if (newPassword.length < 8) { $('setupErr').textContent = '密码至少需要 8 个字符'; return; }
+  if (newPassword !== $('setupPasswordConfirm').value) { $('setupErr').textContent = '两次输入的密码不一致'; return; }
+  $('setupBtn').disabled = true;
+  try {
+    const result = await api('/setup', { method: 'POST', body: { code, newPassword } });
+    token = result.token; sessionStorage.setItem('sr_token', token);
+    hideLogin(); boot();
+  } catch (e) { $('setupErr').textContent = e.message; }
+  finally { $('setupBtn').disabled = false; }
+};
+$('setupCodeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('setupPassword').focus(); });
+$('setupPasswordConfirm').addEventListener('keydown', e => { if (e.key === 'Enter') $('setupBtn').click(); });
 
 // ---------- WebSocket ----------
 function connectWs() {
@@ -1300,6 +1334,8 @@ function shortPath(p) { const parts = String(p).split(/[\\/]/).filter(Boolean); 
 
 // ---------- 启动 ----------
 async function boot() {
+  if (boot.started) return;
+  boot.started = true;
   connectWs();
   renderSchedDays();
   await refreshAll();
@@ -1307,8 +1343,11 @@ async function boot() {
   await refreshAutostart();
 }
 (async () => {
-  try { await api('/state'); hideLogin(); boot(); }   // 已有会话
-  catch { showLogin(); }
+  try {
+    const setup = await api('/setup/status');
+    if (setup.required) return showLogin(true);
+    await api('/state'); hideLogin(); boot(); // 已有会话
+  } catch { showLogin(false); }
 })();
 </script>
 </body>

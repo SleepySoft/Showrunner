@@ -18,7 +18,7 @@
 | 需要联网 | 是（下载 Node/依赖/工具） | 完全离线可用 |
 | 需要管理员 | 否（防火墙放行除外） | 否（防火墙放行除外） |
 
-**用户包的内容**：代码 + 生产依赖（node_modules）+ 便携 Node.js（runtime\node）+ yt-dlp/ffmpeg（bin）。不含任何私有数据——密码在首次启动时自动生成。打包含自动验证：解压到临时目录、只用包内文件启动、确认 /tv/ 和 /remote/ 可访问才算成功。
+**用户包的内容**：代码 + 生产依赖（node_modules）+ 便携 Node.js（runtime\node）+ yt-dlp/ffmpeg（bin）。不含任何私有数据——长期密码由用户在电视配对流程中设置。打包含自动验证：解压到临时目录、只用包内文件启动、确认 /tv/ 和 /remote/ 可访问才算成功。
 
 **维护者打新包**：`scripts\package.bat` → 产物在 `dist\`。
 
@@ -47,7 +47,7 @@
    - `npm install` 安装依赖（express + ws）
    - 下载 `bin\yt-dlp.exe` / `bin\ffmpeg.exe`
    - 尝试放行防火墙 TCP 7100（需管理员；失败会打印手动步骤）
-3. 双击 `start.bat` 启动。首次启动打印遥控器密码（`config.json` 只保存哈希，请立即记下）
+3. 双击 `start.bat` 启动。电视会显示一次性配对码和手机地址；用手机打开该地址并设置长期密码（`config.json` 只保存哈希）
 4. （可选）双击 `scripts\autostart-on.bat` 注册开机自启——登录后无窗口后台运行，日志在 `data\server.log`
 
 ## 路线 C：手动逐条（脚本不可用时）

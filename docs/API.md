@@ -9,10 +9,20 @@
 
 Base URL：`http://<电脑IP>:7100`
 
-除 `POST /api/login` 外，所有 `/api/*` 需要会话（Cookie `sr_session`，登录时下发）。
+除首次配对接口和 `POST /api/login` 外，所有 `/api/*` 需要会话（Cookie `sr_session`，登录或配对成功时下发）。
 `/tv`、`/media`、`/cache`、`/ws-tv` 和兼容旧版的 `/ws` 面向局域网播放端——**公网部署必须屏蔽**。公网仅白名单开放 `/remote`、`/api`、`/ws-remote`。
 
 ## 鉴权
+
+### `GET /api/setup/status` / `POST /api/setup`
+
+未设置长期密码时，状态接口返回 `{ "required": true }`。手机提交电视画面上的 6 位一次性码和自选密码：
+
+```json
+{ "code": "482731", "newPassword": "至少 8 个字符" }
+```
+
+成功响应与登录相同并设置会话 Cookie。配对码错误返回 403，连续失败会返回 429；已经完成配对返回 409。配对码本身只能由本机 loopback 的 `/tv/setup-info` 读取，不通过 `/api/setup/status` 披露。
 
 ### `POST /api/login`
 

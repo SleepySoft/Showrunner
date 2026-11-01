@@ -16,9 +16,12 @@ class Auth {
   }
 
   login(password) {
+    if (!this.isConfigured()) return null;
     if (!this.verifyPassword(password)) return null;
     return this.createSession();
   }
+
+  isConfigured() { return !!(this.passwordHash || this.password); }
 
   createSession() {
     const token = crypto.randomBytes(24).toString('hex');
@@ -27,6 +30,7 @@ class Auth {
   }
 
   verifyPassword(password) {
+    if (!this.isConfigured()) return false;
     const value = String(password ?? '');
     if (this.passwordHash) {
       const parts = String(this.passwordHash).split('$');

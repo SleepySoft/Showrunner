@@ -6,6 +6,7 @@
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const express = require('express');
 
 const { loadConfig, savePasswordHash } = require('./config');
@@ -100,6 +101,11 @@ function createApp(cfg) {
   const scheduler = new Scheduler(persisted);
   // 队列与播出中节目单共享 items 数组引用：编辑节目单即编辑直播队列
   const queue = new QueueManager(persisted, playlists.active()?.items || []);
+  const setup = {
+    required: cfg.setupRequired === undefined ? !cfg.password && !cfg.passwordHash : !!cfg.setupRequired,
+    code: cfg.setupCode || String(crypto.randomInt(0, 1000000)).padStart(6, '0')
+  };
+  if (!setup.required) setup.code = null;
   const auth = new Auth(cfg.password, cfg.sessionTtlHours, cfg.password ? null : cfg.passwordHash);
   let channelSlotKey = null;
   let onDemandActive = false;
@@ -341,6 +347,25 @@ function createApp(cfg) {
     next();
   });
 
+  const isLoopback = address => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(String(address || '').toLowerCase());
+  const remoteUrls = port => {
+    const urls = [];
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) {
+        const family = typeof entry.family === 'string' ? entry.family : (entry.family === 4 ? 'IPv4' : '');
+        if (family === 'IPv4' && !entry.internal) urls.push(`http://${entry.address}:${port}/remote/`);
+      }
+    }
+    return [...new Set(urls)].slice(0, 4);
+  };
+
+  // 配对码只给本机 kiosk。局域网设备只能提交电视上看到的码，不能读取它。
+  app.get('/tv/setup-info', (req, res) => {
+    if (!isLoopback(req.socket.remoteAddress)) return res.status(404).end();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ required: setup.required, code: setup.required ? setup.code : null, remoteUrls: remoteUrls(req.socket.localPort || cfg.port) });
+  });
+
   // 播放端与媒体流：局域网专用，不鉴权
   app.use('/tv', express.static(path.join(cfg.rootDir, 'public', 'tv')));
   app.use('/media', mediaRouter(library));
@@ -349,11 +374,11 @@ function createApp(cfg) {
   // 遥控器：静态页 + API
   app.use('/remote', express.static(path.join(cfg.rootDir, 'public', 'remote')));
   const onPasswordChange = hash => savePasswordHash(cfg.configFile || path.join(cfg.rootDir, 'config.json'), hash);
-  app.use('/api', apiRouter({ auth, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
+  app.use('/api', apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
 
   app.get('/', (req, res) => res.redirect('/remote/'));
 
-  return { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, assetVault, cache, updater, autostart, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, playOnDemand, getTvState };
+  return { app, queue, library, playlists, collections, scheduler, browserctl, auth, setup, store, assetVault, cache, updater, autostart, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, playOnDemand, getTvState };
 }
 
 async function start(cfg) {
@@ -420,7 +445,7 @@ if (require.main === module) {
     console.log('  Showrunner 放映员已启动');
     console.log(`  电视播放端:  http://localhost:${port}/tv/`);
     console.log(`  手机遥控器:  http://${shownHost}:${port}/remote/`);
-    if (cfg.generatedPassword) console.log(`  首次运行，已生成遥控器密码: ${cfg.password}  （配置文件仅保存密码哈希，请立即记下）`);
+    if (cfg.setupRequired) console.log('  首次运行：请在电视画面查看配对码，并用手机设置遥控器密码');
     console.log('');
   });
 }

@@ -76,6 +76,10 @@
 | 电视端 | 收状态，上报进度/结束，并请求切台或点播 | `/ws-tv` 仅限可信局域网；请求仍由服务端按频道权限校验 |
 | 遥控器伪造电视上报 | 无效 | 服务端按 WebSocket 端点区分角色（有测试覆盖） |
 
+#### 首次配对
+
+没有长期密码时，服务端不接受空密码登录，也不生成一个只能从控制台看到的永久密码。电视 kiosk 通过仅限 loopback 的 `/tv/setup-info` 显示一次性 6 位码和局域网地址；手机以配对码调用 `/api/setup` 并选择长期密码。成功后仅持久化 scrypt 哈希，码立即销毁。局域网设备只能查询“是否需要配对”，不能读取配对码；失败尝试有来源限速。见 [ADR-0010](adr/0010-first-run-tv-pairing.md)。
+
 #### 频道、切换与受控点播
 
 原「节目单」在产品界面中升级为「频道」，底层继续使用 `playlists` 字段兼容旧数据和旧 API。一个频道包含三个正交开关：
@@ -197,6 +201,7 @@
 | [原子 JSON 持久化](adr/0004-atomic-json-storage.md) | 符合家庭单机、小数据量和便携部署约束 |
 | [频道与合集独立资产](adr/0008-channel-collection-assets.md) | 防止更新、误删和损坏导致编排资产不可恢复 |
 | [最小共同遥控器按键](adr/0009-minimal-tv-remote-input.md) | 用四个方向键覆盖频道查看、切换和受控点播 |
+| [电视首次配对](adr/0010-first-run-tv-pairing.md) | 让 Windows 静默启动也能安全设置用户自选密码 |
 | [公网仅开放遥控平面](adr/0005-public-control-plane-only.md) | 不把未鉴权的电视与媒体平面暴露到互联网 |
 | [播放异常先记录并跳过](adr/0006-skip-and-log-playback-issues.md) | 在完整恢复体系落地前避免节目无限卡住 |
 | [托管浏览器保持单实例](adr/0007-single-managed-browser-instance.md) | 避免维护窗口与 kiosk 并存造成双播 |

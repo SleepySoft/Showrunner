@@ -45,6 +45,18 @@
   #vodPanel.show { display: block; }
   #vodPanel h2 { margin-bottom: 8px; font-size: 28px; }
   #vodPanel button { display: block; width: 100%; text-align: left; margin-bottom: 8px; }
+  #firstSetup {
+    position: fixed; inset: 0; z-index: 100; display: none; flex-direction: column;
+    align-items: center; justify-content: center; padding: 48px; text-align: center;
+    background: radial-gradient(circle at center, #20242b 0, #08090b 65%);
+    color: #eee; font-family: "Microsoft YaHei", sans-serif;
+  }
+  #firstSetup.show { display: flex; }
+  #firstSetup h1 { font-size: 42px; margin-bottom: 16px; }
+  #firstSetup .lead { font-size: 22px; color: #bbb; }
+  #setupCode { font: 700 72px/1.2 Consolas, monospace; letter-spacing: 18px; margin: 34px 0; color: #fff; }
+  #setupUrls { font-size: 22px; line-height: 1.7; color: #9fd1ff; }
+  #firstSetup .safe { margin-top: 28px; color: #777; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -59,6 +71,13 @@
   <div class="main" id="webTitle">网页片源</div>
   <div class="sub" id="webSub">正在准备…</div>
 </div>
+<div id="firstSetup">
+  <h1>首次设置 Showrunner</h1>
+  <div class="lead">用手机打开下面的遥控器地址，然后输入配对码并设置长期密码</div>
+  <div id="setupCode">------</div>
+  <div id="setupUrls"></div>
+  <div class="safe">配对码只在这台电视上显示，设置完成后立即失效</div>
+</div>
 <div id="channelControls"></div>
 <div id="vodPanel"><h2 id="vodTitle">选择节目</h2><div class="hint">↑↓ 选择　← 确认　→ 返回</div><div id="vodItems"></div><button id="vodClose">返回频道</button></div>
 <script>
@@ -72,6 +91,23 @@ const video = document.getElementById('player');
 const standby = document.getElementById('standby');
 const $ = id => document.getElementById(id);
 const webnote = $('webnote');
+
+async function refreshFirstSetup() {
+  try {
+    const response = await fetch('/tv/setup-info', { cache: 'no-store' });
+    if (!response.ok) return $('firstSetup').classList.remove('show');
+    const info = await response.json();
+    $('firstSetup').classList.toggle('show', !!info.required);
+    if (!info.required) return;
+    $('setupCode').textContent = String(info.code || '').replace(/(.{3})/, '$1 ');
+    const urls = info.remoteUrls?.length ? info.remoteUrls : [`http://本机IP:${location.port || 7100}/remote/`];
+    $('setupUrls').replaceChildren(...urls.map(url => {
+      const line = document.createElement('div'); line.textContent = url; return line;
+    }));
+  } catch {}
+}
+refreshFirstSetup();
+setInterval(refreshFirstSetup, 2000);
 
 // 浏览器右键菜单和双击全屏由 kiosk 接管；键盘只拦截下方明确支持的导航键。
 window.addEventListener('contextmenu', e => e.preventDefault(), { capture: true });

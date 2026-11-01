@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 >nul
-rem 取消开机自启（不会停止当前正在运行的实例）
-schtasks /Delete /TN "Showrunner" /F
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0autostart.ps1" -Action Disable
+set "SHOWRUNNER_EXIT=%ERRORLEVEL%"
 pause
+exit /b %SHOWRUNNER_EXIT%

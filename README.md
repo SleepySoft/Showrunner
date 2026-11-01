@@ -163,7 +163,7 @@ showrunner/
 │   ├── yt-dlp.exe     # 内置 yt-dlp（网页片源下载，不入库，install 自动下载）
 │   └── ffmpeg.exe     # 内置 ffmpeg（音视频合并，不入库，install 自动下载）
 ├── scripts/           # 部署脚本：install / package / autostart / update-tools
-├── test/              # 181 个测试：单元 + 端到端
+├── test/              # 182 个测试：单元 + 端到端
 └── docs/              # 架构 / API / 调试 / 测试 / 部署文档
 ```
 

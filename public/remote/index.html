@@ -481,6 +481,7 @@ let autostartStatus = null;
 let cacheBrief = []; // 网页片源缓存状态摘要（来自 /api/state）
 let collectionsList = [], scheduleRules = [];
 let editingColId = null;
+let channelMediaPicker = null, collectionMediaPicker = null;
 
 // ---------- API ----------
 async function api(path, opts = {}) {
@@ -823,11 +824,22 @@ $('btnAddItem').onclick = async () => {
   const cur = playlists.find(p => p.id === selectedPlId);
   if (!cur) { alert('先创建一个频道'); return; }
   $('addTarget').textContent = cur.name + (cur.active ? '（播出中）' : '');
+  $('addClose').textContent = '完成';
   $('addModal').classList.add('show');
   await renderPickList();
   renderColPickList();
 };
-$('addClose').onclick = async () => { $('addModal').classList.remove('show'); await refreshPlaylists(); };
+$('addClose').onclick = async () => {
+  // “完成”符合用户对确认按钮的预期：若片库还有勾选，先加入，成功后再退出。
+  if (channelMediaPicker?.hasSelection()) {
+    $('addClose').disabled = true;
+    const ok = await channelMediaPicker.commit();
+    $('addClose').disabled = false;
+    if (!ok) return;
+  }
+  $('addModal').classList.remove('show');
+  await refreshPlaylists();
+};
 $('addTabLink').onclick = () => switchAddPane('link');
 $('addTabLocal').onclick = () => switchAddPane('local');
 $('addTabCol').onclick = () => switchAddPane('col');
@@ -838,8 +850,7 @@ function switchAddPane(which) {
   $('addPaneLink').style.display = which === 'link' ? '' : 'none';
   $('addPaneLocal').style.display = which === 'local' ? '' : 'none';
   $('addPaneCol').style.display = which === 'col' ? '' : 'none';
-  if (which === 'local') renderPickList();
-  if (which === 'col') renderColPickList();
+  // 切换标签不重新渲染，避免用户暂时查看别的来源时丢掉已勾选文件。
 }
 
 async function addToSelected(body) {
@@ -862,11 +873,12 @@ async function addLink() {
 async function renderPickList() {
   const r = await api('/library');
   const box = $('pickList');
-  renderMediaTree(box, r.items, {
+  channelMediaPicker = renderMediaTree(box, r.items, {
     selectable: true,
     actionLabel: '加入频道',
     emptyText: '片库为空\n先去「片库」页添加媒体目录',
-    onAdd: ids => addToSelected({ mediaIds: ids })
+    onAdd: ids => addToSelected({ mediaIds: ids }),
+    onSelectionChange: count => { $('addClose').textContent = count ? `加入 ${count} 项并完成` : '完成'; }
   });
 }
 
@@ -892,7 +904,8 @@ function renderMediaTree(container, items, options = {}) {
   container.innerHTML = '';
   if (!items.length) {
     container.innerHTML = `<div class="empty">${esc(options.emptyText || '片库为空').replace(/\n/g, '<br>')}</div>`;
-    return;
+    options.onSelectionChange?.(0);
+    return { hasSelection: () => false, commit: async () => true };
   }
   const tree = buildMediaTree(items);
   const selected = new Set();
@@ -915,22 +928,30 @@ function renderMediaTree(container, items, options = {}) {
     }
     if (selectedLabel) selectedLabel.textContent = `已选择 ${selected.size} 个文件`;
     if (addBtn) addBtn.disabled = selected.size === 0;
+    options.onSelectionChange?.(selected.size);
+  };
+
+  const commitSelected = async () => {
+    if (!selected.size) return true;
+    addBtn.disabled = true; addBtn.textContent = '正在加入…';
+    try {
+      await options.onAdd([...selected]);
+      selected.clear(); refreshChecks();
+      addBtn.textContent = '已加入';
+      setTimeout(() => { if (addBtn.isConnected) addBtn.textContent = options.actionLabel || '加入已选'; }, 1000);
+      return true;
+    } catch (e) {
+      alert('添加失败：' + e.message);
+      addBtn.textContent = options.actionLabel || '加入已选'; refreshChecks();
+      return false;
+    }
   };
 
   if (options.selectable) {
     const bar = document.createElement('div'); bar.className = 'tree-selectbar';
     selectedLabel = document.createElement('span'); selectedLabel.textContent = '已选择 0 个文件';
     addBtn = document.createElement('button'); addBtn.textContent = options.actionLabel || '加入已选'; addBtn.disabled = true;
-    addBtn.onclick = async () => {
-      if (!selected.size) return;
-      addBtn.disabled = true; addBtn.textContent = '正在加入…';
-      try {
-        await options.onAdd([...selected]);
-        selected.clear(); refreshChecks();
-        addBtn.textContent = '已加入';
-        setTimeout(() => { if (addBtn.isConnected) addBtn.textContent = options.actionLabel || '加入已选'; }, 1000);
-      } catch (e) { alert('添加失败：' + e.message); addBtn.textContent = options.actionLabel || '加入已选'; refreshChecks(); }
-    };
+    addBtn.onclick = commitSelected;
     bar.append(selectedLabel, addBtn); container.appendChild(bar);
   }
 
@@ -971,6 +992,7 @@ function renderMediaTree(container, items, options = {}) {
   for (const source of sortedDirs(tree)) wrapper.appendChild(renderDir(source));
   container.appendChild(wrapper);
   refreshChecks();
+  return { hasSelection: () => selected.size > 0, commit: commitSelected };
 }
 
 // 合集抽一集：挑选合集
@@ -1053,6 +1075,7 @@ $('btnColImport').onclick = async () => {
 
 async function openColModal(id) {
   editingColId = id;
+  $('colClose').textContent = '完成';
   $('colModal').classList.add('show');
   await renderColModal();
 }
@@ -1086,14 +1109,15 @@ async function renderColModal() {
   // 片库挑选（加入合集）
   const lib = await api('/library');
   const pick = $('colPickLocal');
-  renderMediaTree(pick, lib.items, {
+  collectionMediaPicker = renderMediaTree(pick, lib.items, {
     selectable: true,
     actionLabel: '加入合集',
     emptyText: '片库为空',
     onAdd: async ids => {
       await api(`/collections/${c.id}/items`, { method: 'POST', body: { mediaIds: ids } });
       await renderColModal(); await refreshCollectionsOnly();
-    }
+    },
+    onSelectionChange: count => { $('colClose').textContent = count ? `加入 ${count} 项并完成` : '完成'; }
   });
 }
 
@@ -1128,7 +1152,16 @@ $('btnColReset').onclick = async () => {
   await api(`/collections/${editingColId}/reset`, { method: 'POST' });
   await renderColModal(); await refreshCollectionsOnly();
 };
-$('colClose').onclick = async () => { $('colModal').classList.remove('show'); await refreshCollectionsOnly(); };
+$('colClose').onclick = async () => {
+  if (collectionMediaPicker?.hasSelection()) {
+    $('colClose').disabled = true;
+    const ok = await collectionMediaPicker.commit();
+    $('colClose').disabled = false;
+    if (!ok) return;
+  }
+  $('colModal').classList.remove('show');
+  await refreshCollectionsOnly();
+};
 
 // ---------- 时刻表 ----------
 const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];

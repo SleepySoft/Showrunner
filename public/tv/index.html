@@ -200,6 +200,11 @@ function showWebnote(cur, sub) {
 
 function playStream(src, s) {
   if (src !== currentSrc) {
+    // 先卸载旧资源，强制 Chromium 立即取消上一个 HTTP/NAS 媒体流。
+    // 连续跳过不可播文件时，不让多个旧请求同时占用文件句柄。
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
     currentSrc = src;
     video.src = src;
     resetPlaybackHealth(s.current?.qid, s.position);

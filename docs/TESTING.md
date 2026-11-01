@@ -13,7 +13,7 @@
 npm test
 ```
 
-测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 179 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 181 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
 
 `test/dev.test.js` 断言开发入口只绑定 loopback，数据与资产落在 `.dev/`，不托管浏览器、不操作开机启动、默认关闭真实缓存，并验证环境变量覆盖与调试密码持久化。
 
@@ -74,6 +74,10 @@ CRUD 与重命名、activate/wasActive 语义、非播出节目单条目编辑�
 | 流式 | 完整下载、Range 206 切片字节级校验、越界 416、目录穿越 404 |
 | WebSocket | 无 token 拒连（4401）、连接即收状态、控制实时推送、电视上报 ended 自动连播、position 心跳不广播、遥控器伪造上报被忽略 |
 | 静态页 | /tv /remote / 可访问 |
+
+### 单元：媒体流生命周期（`test/media-stream.test.js`，2 个）
+
+覆盖 NAS/系统文件句柄耗尽时 `ReadStream` 异步报 `EMFILE` 的降级响应，以及浏览器取消媒体请求时立即销毁文件流，防止未处理 `error` 终止进程和连续跳片造成句柄泄漏。
 
 ### 单元：合集与队列合集解析、循环（`test/collections.test.js`，14 个）
 

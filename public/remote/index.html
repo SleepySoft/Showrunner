@@ -463,6 +463,7 @@
       <div id="colItems"></div>
     </div>
     <div class="sheet-foot">
+      <button id="btnColRename">修改名称</button>
       <button id="btnColMode">切换为随机抽</button>
       <button id="btnColReset">重置进度</button>
       <button id="colClose" class="primary">完成</button>
@@ -1026,9 +1027,7 @@ function renderCollections() {
 }
 
 $('btnColNew').onclick = async () => {
-  const name = prompt('合集名称', '蓝色星球 全集');
-  if (name === null) return;
-  const r = await api('/collections', { method: 'POST', body: { name } });
+  const r = await api('/collections', { method: 'POST', body: { name: '新合集' } });
   await refreshCollectionsOnly();
   openColModal(r.collection.id);
 };
@@ -1114,6 +1113,15 @@ $('btnColMode').onclick = async () => {
   const c = collectionsList.find(x => x.id === editingColId);
   await api(`/collections/${editingColId}/mode`, { method: 'POST', body: { mode: c?.mode === 'random' ? 'sequential' : 'random' } });
   await renderColModal(); await refreshCollectionsOnly();
+};
+$('btnColRename').onclick = async () => {
+  const c = collectionsList.find(x => x.id === editingColId);
+  const name = prompt('修改合集名称', c?.name || '新合集');
+  if (name === null) return;
+  if (!name.trim()) { alert('合集名称不能为空'); return; }
+  await api(`/collections/${editingColId}/rename`, { method: 'POST', body: { name: name.trim() } });
+  await refreshCollectionsOnly();
+  await renderColModal();
 };
 $('btnColReset').onclick = async () => {
   if (!confirm('重置进度：下次从第一集重新开始？')) return;

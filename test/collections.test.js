@@ -36,6 +36,12 @@ test('合集 CRUD 与序列化', () => {
   assert.equal(cm2.remove('不存在'), false);
 });
 
+test('未指定名称时创建为“新合集”', () => {
+  const cm = new CollectionManager(null);
+  assert.equal(cm.create().name, '新合集');
+  assert.equal(cm.create('   ').name, '新合集');
+});
+
 test('批量加入合集只发出一次 change', () => {
   const cm = new CollectionManager(null);
   const c = cm.create('网站合集');

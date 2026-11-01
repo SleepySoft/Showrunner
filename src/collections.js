@@ -40,7 +40,7 @@ class CollectionManager extends EventEmitter {
   create(name, mode = 'sequential') {
     const c = {
       id: crypto.randomUUID(),
-      name: String(name || '未命名合集').trim().slice(0, 50) || '未命名合集',
+      name: String(name || '新合集').trim().slice(0, 50) || '新合集',
       mode: mode === 'random' ? 'random' : 'sequential',
       items: [], cursor: 0, randomPool: null,
       createdAt: Date.now()

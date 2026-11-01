@@ -400,8 +400,18 @@ function apiRouter({ auth, setup, library, queue, playlists, collections, schedu
   });
 
   router.post('/collections/:id/rename', (req, res) => {
-    if (!collections.rename(req.params.id, req.body?.name)) return res.status(404).json({ error: 'not found' });
-    res.json({ ok: true });
+    const c = collections.get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    const name = String(req.body?.name || '').trim().slice(0, 50);
+    if (!name) return res.status(400).json({ error: '合集名称不能为空' });
+    // 已加入频道的「合集抽一集」条目也同步显示新名称；rename 的 change 事件会一起持久化。
+    for (const channel of playlists.playlists) {
+      for (const item of channel.items) {
+        if (item.type === 'collection' && item.collectionId === c.id) item.title = name;
+      }
+    }
+    collections.rename(c.id, name);
+    res.json({ ok: true, collection: { id: c.id, name: c.name } });
   });
 
   router.delete('/collections/:id', (req, res) => {

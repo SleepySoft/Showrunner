@@ -161,6 +161,23 @@ test('合集：创建 → 加两集 → 禁止嵌套', async () => {
   assert.equal(nest.status, 400);
 });
 
+test('合集创建后可改名，并同步频道里的合集条目名称', async () => {
+  const created = await (await post('/api/collections', {})).json();
+  assert.equal(created.collection.name, '新合集');
+  const id = created.collection.id;
+  const added = await (await post(`/api/playlists/${playlistId}/items`, { collectionId: id })).json();
+
+  const renamed = await post(`/api/collections/${id}/rename`, { name: '后来才知道的名字' });
+  assert.equal(renamed.status, 200);
+  const detail = await (await authed(`/api/collections/${id}`)).json();
+  assert.equal(detail.collection.name, '后来才知道的名字');
+
+  const playlist = await (await authed(`/api/playlists/${playlistId}`)).json();
+  assert.equal(playlist.playlist.items.find(item => item.collectionId === id).title, '后来才知道的名字');
+  await authed(`/api/playlists/${playlistId}/items/${added.added[0].qid}`, { method: 'DELETE' });
+  await authed(`/api/collections/${id}`, { method: 'DELETE' });
+});
+
 test('从网站链接创建并批量导入合集', async () => {
   const r = await post('/api/collections/import', { url: 'https://example.com/series' });
   assert.equal(r.status, 201);

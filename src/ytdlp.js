@@ -1,6 +1,7 @@
 'use strict';
 /**
- * yt-dlp 封装：查找可执行文件、抓取视频信息、下载并解析进度。
+ * yt-dlp 执行层：查找可执行文件、抓取视频信息、展开通用播放列表、下载并解析进度。
+ * 具体网站兼容逻辑由 src/sources 注册表负责，本文件不判断站点域名。
  * spawnImpl 可注入，便于测试（测试不触网、不起真实进程）。
  *
  * 查找顺序：config.ytdlpPath → PATH → <项目>/bin/yt-dlp(.exe)
@@ -9,6 +10,9 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
+const { defaultRegistry } = require('./sources');
+const { analyzeCollection: fetchBilibiliCollection } = require('./sources/bilibili');
+const { entryLimit } = require('./sources/common');
 
 function findOnPath(names) {
   const pathExt = (process.env.PATHEXT || '.EXE;.BAT;.CMD').split(';');
@@ -82,6 +86,78 @@ function fetchInfo(ytdlp, url, { spawnImpl = spawn, timeoutMs = 30000 } = {}) {
 }
 
 /**
+ * 展开网站播放列表/分 P 视频，返回可逐集缓存的网页条目。
+ * 使用 flat-playlist，只取元数据而不解析每一集的真实媒体流，速度较快。
+ */
+function fetchCollectionViaYtdlp(ytdlp, url, {
+  spawnImpl = spawn,
+  timeoutMs = 60000,
+  cookiesFromBrowser = null,
+  maxEntries = 500,
+  normalizeEntry = null
+} = {}) {
+  return new Promise(resolve => {
+    const limit = entryLimit(maxEntries);
+    const args = [
+      '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings',
+      '--playlist-end', String(limit)
+    ];
+    if (cookiesFromBrowser) args.push('--cookies-from-browser', cookiesFromBrowser);
+    args.push(url);
+
+    let out = '', lastErr = '', proc, done = false;
+    const finish = result => { if (!done) { done = true; clearTimeout(timer); resolve(result); } };
+    try { proc = spawnImpl(ytdlp, args, { stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { return resolve({ ok: false, error: e.message }); }
+    if (!proc || !proc.stdout) return resolve({ ok: false, error: '无法启动 yt-dlp' });
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch {}
+      finish({ ok: false, error: '解析网站合集超时' });
+    }, timeoutMs);
+    proc.stdout.on('data', d => { out += d; });
+    proc.stderr?.on('data', d => { lastErr = String(d).slice(-500); });
+    proc.on('error', e => finish({ ok: false, error: e.message }));
+    proc.on('close', code => {
+      if (done) return;
+      if (code !== 0) return finish({ ok: false, error: lastErr.trim() || `yt-dlp 退出码 ${code}` });
+      try {
+        const root = JSON.parse(out);
+        const rawEntries = Array.isArray(root.entries) && root.entries.length ? root.entries : [root];
+        const entries = [];
+        const seen = new Set();
+        for (let i = 0; i < rawEntries.length; i++) {
+          const e = rawEntries[i] || {};
+          let itemUrl = [e.webpage_url, e.original_url, e.url].find(v => /^https?:\/\//i.test(String(v || '')));
+          const normalized = normalizeEntry?.({ itemUrl, entry: e, root, rawEntries, sourceUrl: url, index: i });
+          if (normalized?.url) itemUrl = normalized.url;
+          if (!itemUrl) continue;
+          if (seen.has(itemUrl)) continue;
+          seen.add(itemUrl);
+          entries.push({
+            url: itemUrl,
+            title: String(e.title || e.fulltitle || `第 ${i + 1} 集`).trim() || `第 ${i + 1} 集`
+          });
+        }
+        if (!entries.length) return finish({ ok: false, error: '网站没有返回可导入的剧集' });
+        finish({
+          ok: true,
+          title: String(root.title || root.playlist_title || entries[0].title || '网站合集').trim(),
+          entries,
+          truncated: rawEntries.length >= limit
+        });
+      } catch (e) {
+        finish({ ok: false, error: `无法解析 yt-dlp 输出：${e.message}` });
+      }
+    });
+  });
+}
+
+/** 由网站源注册表分派专用解析；不能处理时自动回退到通用 yt-dlp。 */
+async function fetchCollection(ytdlp, url, opts = {}) {
+  return defaultRegistry.analyzeCollection(url, { ...opts, ytdlp, fetchCollectionViaYtdlp });
+}
+
+/**
  * 下载到目标路径模板（含 %(ext)s）。onProgress(percent) 回报进度。
  * 返回 Promise<{ ok, error? }>。
  */
@@ -135,4 +211,8 @@ function checkYtdlp(ytdlp) {
   }
 }
 
-module.exports = { findYtdlp, findFfmpeg, hasFfmpeg, fetchInfo, download, parseProgress, checkYtdlp };
+module.exports = {
+  findYtdlp, findFfmpeg, hasFfmpeg, fetchInfo,
+  fetchCollection, fetchCollectionViaYtdlp, fetchBilibiliCollection,
+  download, parseProgress, checkYtdlp
+};

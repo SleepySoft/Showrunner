@@ -8,17 +8,51 @@ const crypto = require('crypto');
 const COOKIE = 'sr_session';
 
 class Auth {
-  constructor(password, ttlHours = 720) {
+  constructor(password, ttlHours = 720, passwordHash = null) {
     this.password = password;
+    this.passwordHash = passwordHash;
     this.ttlMs = ttlHours * 3600 * 1000;
     this.sessions = new Map(); // token -> expiresAt
   }
 
   login(password) {
-    if (password !== this.password) return null;
+    if (!this.verifyPassword(password)) return null;
+    return this.createSession();
+  }
+
+  createSession() {
     const token = crypto.randomBytes(24).toString('hex');
     this.sessions.set(token, Date.now() + this.ttlMs);
     return token;
+  }
+
+  verifyPassword(password) {
+    const value = String(password ?? '');
+    if (this.passwordHash) {
+      const parts = String(this.passwordHash).split('$');
+      if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+      try {
+        const salt = Buffer.from(parts[1], 'hex');
+        const expected = Buffer.from(parts[2], 'hex');
+        const actual = crypto.scryptSync(value, salt, expected.length);
+        return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+      } catch { return false; }
+    }
+    const actual = Buffer.from(value);
+    const expected = Buffer.from(String(this.password ?? ''));
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  }
+
+  setPasswordHash(hash) {
+    this.password = null;
+    this.passwordHash = hash;
+    this.sessions.clear(); // 改密后所有旧设备必须重新登录
+  }
+
+  static hashPassword(password) {
+    const salt = crypto.randomBytes(16);
+    const derived = crypto.scryptSync(String(password), salt, 32);
+    return `scrypt$${salt.toString('hex')}$${derived.toString('hex')}`;
   }
 
   logout(token) {

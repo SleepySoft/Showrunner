@@ -205,7 +205,8 @@ test('未登记媒体 ID 返回 404（无目录穿越）', async () => {
 
 function openWs(role, tk) {
   return new Promise((resolve, reject) => {
-    const url = `ws://127.0.0.1:${srv.port}/ws?role=${role}` + (tk ? `&token=${tk}` : '');
+    const endpoint = role === 'tv' ? '/ws-tv' : '/ws-remote';
+    const url = `ws://127.0.0.1:${srv.port}${endpoint}` + (tk ? `?token=${tk}` : '');
     const ws = new WebSocket(url);
     // 消息缓冲：解决「消息在监听挂上之前到达」的竞态
     const inbox = [];
@@ -223,12 +224,22 @@ function openWs(role, tk) {
 }
 
 test('遥控器 WS 无 token 被拒', async () => {
-  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/ws?role=remote`);
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/ws-remote`);
   const code = await new Promise(resolve => {
     ws.on('close', c => resolve(c));
     ws.on('error', () => resolve(-1));
   });
   assert.equal(code, 4401); // 服务端完成握手后立即以 4401 关闭
+});
+
+test('遥控器 WS 可用 HttpOnly 会话 Cookie 鉴权，无需在 URL 暴露 token', async () => {
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/ws-remote`, { headers: { Cookie: cookie } });
+  const first = await new Promise((resolve, reject) => {
+    ws.once('message', d => resolve(JSON.parse(d)));
+    ws.once('error', reject);
+  });
+  assert.equal(first.type, 'state');
+  ws.close();
 });
 
 test('电视端连接即收状态，控制变更实时推送', async () => {
@@ -282,10 +293,60 @@ test('遥控器端不能伪造 ended/position 上报', async () => {
   remote.close();
 });
 
+test('电视端可在多个启用频道间切换，并仅在授权后点播', async () => {
+  const before = await (await authed('/api/state')).json();
+  const originalId = before.activeId;
+  const created = await (await authed('/api/playlists', {
+    method: 'POST', body: JSON.stringify({ name: '点播频道' })
+  })).json();
+  const channelId = created.playlist.id;
+  const add = await (await authed(`/api/playlists/${channelId}/items`, {
+    method: 'POST', body: JSON.stringify({ mediaId: mediaId1 })
+  })).json();
+  await authed(`/api/playlists/${channelId}/options`, {
+    method: 'POST', body: JSON.stringify({ enabled: true, allowOnDemand: true, autoPlay: false })
+  });
+
+  const tv = await openWs('tv');
+  const initial = await tv.next();
+  assert.equal(initial.data.channels.length, 2);
+  const vod = initial.data.channels.find(c => c.id === channelId);
+  assert.equal(vod.allowOnDemand, true);
+  assert.equal(vod.items[0].qid, add.added[0].qid);
+
+  tv.send(JSON.stringify({ type: 'selectChannel', channelId }));
+  let selected;
+  for (let i = 0; i < 6; i++) {
+    selected = await tv.next();
+    if (selected.data?.selectedChannelId === channelId && selected.data.waiting?.reason === 'on-demand') break;
+  }
+  assert.equal(selected.data.selectedChannelId, channelId);
+  assert.equal(selected.data.waiting.reason, 'on-demand');
+
+  tv.send(JSON.stringify({ type: 'onDemand', qid: add.added[0].qid }));
+  let playing;
+  for (let i = 0; i < 4; i++) {
+    playing = await tv.next();
+    if (playing.data?.status === 'playing' && playing.data.current?.qid === add.added[0].qid) break;
+  }
+  assert.equal(playing.data.current.title, '宇宙奇观');
+  tv.close();
+
+  await authed(`/api/playlists/${channelId}`, { method: 'DELETE' });
+  await authed(`/api/playlists/${originalId}/activate`, { method: 'POST' });
+});
+
 // ---------- 静态页 ----------
 
 test('电视端与遥控器页面可访问', async () => {
-  assert.equal((await fetch(base + '/tv/')).status, 200);
+  const tvRes = await fetch(base + '/tv/');
+  assert.equal(tvRes.status, 200);
+  const tvHtml = await tvRes.text();
+  assert.match(tvHtml, /key === 'ArrowUp'/);
+  assert.match(tvHtml, /key === 'ArrowDown'/);
+  assert.match(tvHtml, /key === 'ArrowLeft'.*'Enter'.*'OK'/s);
+  assert.match(tvHtml, /key === 'ArrowRight'.*'ContextMenu'.*'BrowserBack'/s);
+  assert.match(tvHtml, /音量、电源等系统键不拦截/);
   assert.equal((await fetch(base + '/remote/')).status, 200);
   assert.equal((await fetch(base + '/')).status, 200); // 重定向跟随
 });

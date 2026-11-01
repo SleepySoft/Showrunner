@@ -106,6 +106,14 @@ before(async () => {
     cacheDir: path.join(tmp, 'cache'),
     disableCache: true,
     disableScheduler: true, // 关掉 15 秒自动 tick，测试里手动对齐
+    siteCollectionImporter: async url => ({
+      ok: true,
+      title: '网站纪录片',
+      entries: [
+        { title: '网站第一集', url: url + '?p=1' },
+        { title: '网站第二集', url: url + '?p=2' }
+      ]
+    }),
     sessionTtlHours: 1
   });
   base = `http://127.0.0.1:${srv.port}`;
@@ -151,6 +159,21 @@ test('合集：创建 → 加两集 → 禁止嵌套', async () => {
   // 嵌套合集被拒
   const nest = await post(`/api/collections/${collectionId}/items`, { collectionId });
   assert.equal(nest.status, 400);
+});
+
+test('从网站链接创建并批量导入合集', async () => {
+  const r = await post('/api/collections/import', { url: 'https://example.com/series' });
+  assert.equal(r.status, 201);
+  const body = await r.json();
+  assert.equal(body.collection.name, '网站纪录片');
+  assert.equal(body.imported, 2);
+
+  const detail = await (await authed(`/api/collections/${body.collection.id}`)).json();
+  assert.deepEqual(detail.collection.items.map(i => i.title), ['网站第一集', '网站第二集']);
+  assert.ok(detail.collection.items.every(i => i.type === 'web'));
+
+  // 不影响本文件后续对原合集数量的断言
+  assert.equal((await authed(`/api/collections/${body.collection.id}`, { method: 'DELETE' })).status, 200);
 });
 
 test('合集抽一集入列 → 播出显示第1集，再轮到播第2集', async () => {

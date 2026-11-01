@@ -16,6 +16,10 @@ class CollectionManager extends EventEmitter {
     this.collections = Array.isArray(persisted?.collections) ? persisted.collections : [];
     for (const c of this.collections) {
       if (!Array.isArray(c.items)) c.items = [];
+      for (const item of c.items) {
+        if (!item.qid) item.qid = crypto.randomUUID();
+        if (!item.type) item.type = item.url ? 'web' : 'local';
+      }
       if (typeof c.cursor !== 'number') c.cursor = 0;
       if (!c.mode) c.mode = 'sequential';
       if (!Array.isArray(c.randomPool)) c.randomPool = null; // random 模式的剩余池
@@ -79,6 +83,16 @@ class CollectionManager extends EventEmitter {
     c.items.push(entry);
     this.emit('change');
     return entry;
+  }
+
+  /** 批量加入条目，只广播一次 change，避免导入大型网站合集时反复写盘。 */
+  addItems(id, items) {
+    const c = this.get(id);
+    if (!c || !Array.isArray(items)) return null;
+    const entries = items.map(item => ({ qid: crypto.randomUUID(), addedAt: Date.now(), ...item }));
+    c.items.push(...entries);
+    if (entries.length) this.emit('change');
+    return entries;
   }
 
   removeItem(id, qid) {

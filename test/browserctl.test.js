@@ -24,7 +24,10 @@ function makeFake() {
     spawned.push(proc);
     return proc;
   };
-  const execImpl = cmd => execed.push(cmd);
+  const execImpl = (cmd, cb) => {
+    execed.push(cmd);
+    if (cb) process.nextTick(() => cb(null, '', ''));
+  };
   return { spawned, execed, spawnImpl, execImpl };
 }
 
@@ -37,10 +40,11 @@ const opts = over => ({
   ...over
 });
 
-test('启动即拉起 kiosk（独立 profile + kiosk 参数）', () => {
+test('启动即清理遗留受控实例并拉起 kiosk（独立 profile + kiosk 参数）', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
+  await bc.start(60000);
+  assert.ok(f.execed[0].includes('showrunner-maintenance-profile'));
   assert.equal(f.spawned.length, 1);
   assert.ok(f.spawned[0].args.includes('--kiosk'));
   assert.ok(f.spawned[0].args.includes('http://localhost:7100/tv/'));
@@ -49,69 +53,101 @@ test('启动即拉起 kiosk（独立 profile + kiosk 参数）', () => {
   bc.stop();
 });
 
-test('kiosk 意外退出后 tick 自动重拉（看门狗）', () => {
+test('kiosk 意外退出后 tick 自动重拉（看门狗）', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
+  await bc.start(60000);
   f.spawned[0].simulateExit();
   assert.equal(bc.status().kioskRunning, false);
-  bc.tick();
+  await bc.tick();
   assert.equal(f.spawned.length, 2);
   bc.stop();
 });
 
-test('维护模式：杀 kiosk + 打开一次普通浏览器 + 设回锁时间', () => {
+test('维护模式：回收 kiosk 后只打开一个受控普通窗口', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
-  const s = bc.setMode('maintenance');
+  await bc.start(60000);
+  const s = await bc.setMode('maintenance');
   assert.equal(s.mode, 'maintenance');
   assert.ok(s.maintenanceUntil > Date.now());
   assert.ok(f.execed.some(c => c.includes('taskkill')));      // kiosk 被杀
-  assert.ok(f.execed.some(c => c.includes('start')));         // 普通浏览器被打开
+  assert.equal(f.spawned.length, 2);                          // kiosk + 受控维护窗口
+  assert.equal(f.spawned[1].args.includes('--kiosk'), false);
+  assert.ok(f.spawned[1].args.includes('--new-window'));
   assert.equal(bc.status().kioskRunning, false);
+  assert.equal(bc.status().maintenanceBrowserRunning, true);
+  assert.equal(bc.status().managedBrowserRunning, true);
   bc.stop();
 });
 
-test('维护模式超时自动回锁并重拉 kiosk', () => {
+test('维护模式超时先关闭普通窗口，再拉起唯一 kiosk', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
-  bc.setMode('maintenance');
+  await bc.start(60000);
+  await bc.setMode('maintenance');
   bc.maintenanceUntil = Date.now() - 1; // 模拟已超时
-  bc.tick();
+  await bc.tick();
   assert.equal(bc.status().mode, 'normal');
-  assert.equal(f.spawned.length, 2); // kiosk 重拉
+  assert.equal(f.spawned.length, 3); // 初始 kiosk + 维护窗口 + 新 kiosk
+  assert.equal(bc.status().maintenanceBrowserRunning, false);
+  assert.equal(bc.status().kioskRunning, true);
+  assert.ok(f.execed.some(c => c.includes('/PID 4001'))); // 维护窗口已按进程树回收
   bc.stop();
 });
 
-test('手动回锁立即重拉 kiosk', () => {
+test('手动回锁先关闭维护窗口再拉 kiosk，旧进程迟到退出不影响新实例', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
-  bc.setMode('maintenance');
-  bc.setMode('normal');
+  await bc.start(60000);
+  await bc.setMode('maintenance');
+  await bc.setMode('normal');
   assert.equal(bc.status().mode, 'normal');
+  assert.equal(bc.status().kioskRunning, true);
+  assert.equal(bc.status().maintenanceBrowserRunning, false);
+  f.spawned[1].simulateExit(); // 被 taskkill 的旧维护进程稍后才发 exit
   assert.equal(bc.status().kioskRunning, true);
   bc.stop();
 });
 
-test('非法模式返回 null，同模式幂等', () => {
+test('下线模式释放所有受控浏览器且不会被看门狗重拉，上线后恢复', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
-  assert.equal(bc.setMode('hack'), null);
-  assert.equal(bc.setMode('normal').mode, 'normal');
+  await bc.start(60000);
+  assert.equal((await bc.setMode('offline')).mode, 'offline');
+  assert.equal(bc.status().kioskRunning, false);
+  await bc.tick();
+  assert.equal(f.spawned.length, 1);
+  await bc.setMode('normal');
+  assert.equal(f.spawned.length, 2);
   bc.stop();
 });
 
-test('manage=false 完全不碰浏览器（含模式切换）', () => {
+test('以持久化下线状态启动时不拉 kiosk', async () => {
+  const f = makeFake();
+  const bc = new BrowserController(opts({ initialMode: 'offline', spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
+  await bc.start(60000);
+  assert.equal(f.spawned.length, 0);
+  assert.equal(bc.status().mode, 'offline');
+  bc.stop();
+});
+
+test('非法模式返回 null，同模式幂等', async () => {
+  const f = makeFake();
+  const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
+  await bc.start(60000);
+  assert.equal(await bc.setMode('hack'), null);
+  assert.equal((await bc.setMode('normal')).mode, 'normal');
+  bc.stop();
+});
+
+test('manage=false 完全不碰浏览器（含模式切换）', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ manage: false, spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
-  bc.start(60000);
+  await bc.start(60000);
   bc.tick();
-  bc.setMode('maintenance'); // 回归：托管关闭时切模式也不许有进程副作用
-  bc.setMode('normal');
+  await bc.setMode('maintenance'); // 回归：托管关闭时切模式也不许有进程副作用
+  await bc.setMode('normal');
   assert.equal(f.spawned.length, 0);
   assert.equal(f.execed.length, 0);
   assert.equal(bc.status().manageBrowser, false);
@@ -164,6 +200,11 @@ test('POST /api/mode 切换模式', async () => {
   assert.ok(s.maintenanceUntil > Date.now());
   const s2 = await (await authed('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'normal' }) })).json();
   assert.equal(s2.mode, 'normal');
+  const s3 = await (await authed('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'offline' }) })).json();
+  assert.equal(s3.mode, 'offline');
+  const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'data.json'), 'utf8'));
+  assert.equal(saved.settings.offline, true);
+  await authed('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'normal' }) });
 });
 
 test('POST /api/mode 非法模式 400 + 未登录 401', async () => {

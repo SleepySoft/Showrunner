@@ -64,6 +64,11 @@
     padding: 7px 12px; font-size: 13px; border: 1px solid var(--line);
     border-radius: 8px; background: var(--card); color: var(--text); cursor: pointer;
   }
+  .maint .actions { display: flex; gap: 6px; }
+  .settings-input {
+    width: 100%; padding: 12px; margin-bottom: 10px; font-size: 15px;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text);
+  }
 
   /* 列表 */
   .item {
@@ -80,6 +85,34 @@
     width: 34px; height: 34px; border-radius: 8px; font-size: 15px; cursor: pointer; flex-shrink: 0;
   }
   .item button.del { color: var(--danger); }
+  .media-tree { font-size: 14px; }
+  .media-tree details { margin-left: 14px; }
+  .media-tree > details { margin-left: 0; }
+  .media-tree summary {
+    display: flex; align-items: center; gap: 7px; padding: 8px 4px;
+    cursor: pointer; color: var(--text); list-style: none;
+  }
+  .media-tree summary::-webkit-details-marker { display: none; }
+  .media-tree summary::before { content: '▸'; width: 12px; color: var(--sub); }
+  .media-tree details[open] > summary::before { content: '▾'; }
+  .media-tree .tree-file {
+    display: flex; align-items: center; gap: 8px; min-height: 42px;
+    margin-left: 28px; padding: 6px 4px; border-bottom: 1px solid var(--line);
+  }
+  .media-tree .tree-file .tree-name { flex: 1; min-width: 0; }
+  .media-tree .tree-file .tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .media-tree .tree-file .tree-meta { color: var(--sub); font-size: 11px; margin-top: 2px; }
+  .media-tree input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--text); flex-shrink: 0; }
+  .media-tree .tree-add {
+    border: 1px solid var(--line); background: none; color: var(--sub);
+    width: 32px; height: 32px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
+  }
+  .tree-selectbar {
+    position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between;
+    align-items: center; gap: 8px; padding: 8px; margin-bottom: 6px;
+    background: var(--bg); border-bottom: 1px solid var(--line); color: var(--sub); font-size: 12px;
+  }
+  .tree-selectbar button { padding: 8px 12px; border: none; border-radius: 8px; background: var(--text); color: var(--bg); cursor: pointer; }
   .badge {
     display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px;
     border: 1px solid var(--line); color: var(--sub); margin-right: 6px; vertical-align: 1px;
@@ -95,7 +128,7 @@
   .toolbar button.warn { color: var(--danger); }
   .toolbar button.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
 
-  /* 节目单选择栏 */
+  /* 频道选择栏 */
   .plbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: stretch; }
   .plbar select {
     flex: 1; min-width: 0; padding: 9px 10px; font-size: 14px;
@@ -219,7 +252,7 @@
 
 <nav>
   <button data-tab="now" class="active">正在播放</button>
-  <button data-tab="queue">节目单</button>
+  <button data-tab="queue">频道</button>
   <button data-tab="collections">合集</button>
   <button data-tab="schedule">时刻表</button>
   <button data-tab="library">片库</button>
@@ -244,7 +277,19 @@
       <div class="vol">🔈 <input type="range" id="vol" min="0" max="1" step="0.05" value="1"></div>
       <div class="maint" id="maintRow">
         <span id="maintLabel">电视：锁定播放</span>
-        <button id="btnMaint">进入维护模式</button>
+        <div class="actions"><button id="btnMaint">进入维护模式</button><button id="btnOffline">下线</button></div>
+      </div>
+      <div class="maint" id="autostartRow">
+        <span id="autostartLabel">开机启动：检查中…</span>
+        <button id="btnAutostart">配置</button>
+      </div>
+      <div class="maint">
+        <span>遥控器登录密码</span>
+        <button id="btnPassword">修改密码</button>
+      </div>
+      <div class="maint" id="updateRow">
+        <span id="updLabel">版本 …</span>
+        <button id="btnUpdate">检查更新</button>
       </div>
     </div>
     <div class="card" id="upnextCard" style="display:none">
@@ -253,23 +298,36 @@
     </div>
   </section>
 
-  <!-- 节目单 -->
+  <!-- 频道 -->
   <section id="tab-queue" class="tab">
     <div class="plbar">
       <select id="plSelect"></select>
-      <button id="btnPlActivate" class="primary">播出</button>
-      <button id="btnPlNew" title="新建节目单">＋</button>
+      <button id="btnPlActivate" class="primary">切换</button>
+      <button id="btnPlNew" title="新建频道">＋</button>
       <button id="btnPlRename" title="重命名">✎</button>
       <button id="btnPlDelete" title="删除">🗑</button>
     </div>
     <div class="pl-status" id="plStatus"></div>
     <div class="looprow">
+      <input type="checkbox" id="plEnabled"><label for="plEnabled">在电视端启用此频道</label>
+    </div>
+    <div class="looprow">
+      <input type="checkbox" id="plVod"><label for="plVod">允许电视端点播频道内节目</label>
+    </div>
+    <div class="looprow">
+      <input type="checkbox" id="plAuto"><label for="plAuto">自动播出（关闭后为纯点播频道）</label>
+    </div>
+    <div class="looprow">
       <input type="checkbox" id="plLoop">
       <label for="plLoop">🔁 循环播出（播完最后一部从头再来，合集条目会抽新集）</label>
     </div>
+    <div class="add-hint" style="margin:-4px 0 12px">节目旁的 🕐 可分别设置每日开播点和播放上限。频道中只要有指定开播点，就进入严格排时；未指定时间的节目仍可点播，但不会插入定时档。</div>
     <div class="toolbar">
       <button id="btnAddItem" class="primary">＋ 添加节目</button>
-      <button id="btnExport" title="导出全部节目单 / 合集 / 时刻表">📄 导出节目表</button>
+      <button id="btnAssetExport" title="无损备份全部频道、合集与时刻表，可用于恢复和分享">💾 备份资产</button>
+      <button id="btnAssetImport" title="从 .showrunner.json 恢复或合并资产">📥 导入资产</button>
+      <button id="btnExport" title="导出便于阅读的节目表，不用于恢复">📄 导出阅读版</button>
+      <input id="assetImportFile" type="file" accept=".json,.showrunner.json,application/json" hidden>
     </div>
     <div id="queueList"></div>
   </section>
@@ -277,7 +335,8 @@
   <!-- 合集 -->
   <section id="tab-collections" class="tab">
     <div class="toolbar">
-      <button id="btnColNew" class="primary">＋ 新建合集</button>
+      <button id="btnColNew" class="primary">＋ 新建空合集</button>
+      <button id="btnColImport">🌐 导入网站合集</button>
     </div>
     <div id="colList"></div>
   </section>
@@ -294,7 +353,7 @@
           <span style="color:var(--sub)">到</span>
           <input type="time" id="schedEnd" value="20:00">
         </div>
-        <label><input type="checkbox" id="schedLoop"> 循环播出该节目单</label>
+        <label><input type="checkbox" id="schedLoop"> 循环播出该频道</label>
         <button class="primary" id="btnSchedAdd" style="padding:11px;border:none;border-radius:8px;background:var(--text);color:var(--bg);font-weight:600;cursor:pointer">添加规则</button>
       </div>
     </div>
@@ -328,6 +387,20 @@
   </div>
 </div>
 
+<!-- 修改密码弹窗 -->
+<div id="passwordModal" class="modal">
+  <div class="sheet">
+    <div class="sheet-head"><div style="font-size:15px;font-weight:600">修改遥控器密码</div></div>
+    <div class="sheet-body">
+      <input class="settings-input" id="currentPassword" type="password" placeholder="当前密码" autocomplete="current-password">
+      <input class="settings-input" id="newPassword" type="password" placeholder="新密码（至少 8 个字符）" autocomplete="new-password">
+      <input class="settings-input" id="confirmPassword" type="password" placeholder="再次输入新密码" autocomplete="new-password">
+      <div class="add-hint" id="passwordError" style="color:var(--danger)"></div>
+    </div>
+    <div class="sheet-foot"><button id="passwordCancel">取消</button><button id="passwordSave" class="primary">保存并重新登录其他设备</button></div>
+  </div>
+</div>
+
 <!-- 添加节目弹窗 -->
 <div id="addModal" class="modal">
   <div class="sheet">
@@ -351,7 +424,7 @@
         <div id="pickList"></div>
       </div>
       <div id="addPaneCol" style="display:none">
-        <div class="add-hint" style="margin-top:0;margin-bottom:10px">选一个合集：节目单里只占一格，每次轮到它播出就自动抽合集中的下一集——适合「每天一集连续剧」。</div>
+        <div class="add-hint" style="margin-top:0;margin-bottom:10px">选一个合集：频道里只占一格，每次轮到它播出就自动抽合集中的下一集——适合「每天一集连续剧」。</div>
         <div id="colPickList"></div>
       </div>
     </div>
@@ -390,6 +463,7 @@ const $ = id => document.getElementById(id);
 let token = sessionStorage.getItem('sr_token') || null;
 let state = null, queue = [], playlists = [], activeId = null, selectedPlId = null;
 let modeStatus = null;
+let autostartStatus = null;
 let cacheBrief = []; // 网页片源缓存状态摘要（来自 /api/state）
 let collectionsList = [], scheduleRules = [];
 let editingColId = null;
@@ -425,7 +499,7 @@ $('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn')
 // ---------- WebSocket ----------
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws?role=remote&token=${token}`);
+  const ws = new WebSocket(`${proto}://${location.host}/ws-remote`);
   ws.onopen = () => { $('conn').textContent = '已连接'; $('conn').classList.add('on'); };
   ws.onclose = () => {
     $('conn').textContent = '已断开'; $('conn').classList.remove('on');
@@ -460,6 +534,14 @@ function renderMode() {
   if (!modeStatus.manageBrowser) { row.style.display = 'none'; return; }
   row.style.display = '';
   const m = modeStatus.mode === 'maintenance';
+  const offline = modeStatus.mode === 'offline';
+  $('btnMaint').style.display = offline ? 'none' : '';
+  $('btnOffline').textContent = offline ? '重新上线' : '下线';
+  if (offline) {
+    row.classList.add('warn');
+    $('maintLabel').textContent = '⏻ 已下线 · 电脑已释放，后台遥控仍可用';
+    return;
+  }
   row.classList.toggle('warn', m);
   if (m) {
     const leftMin = Math.max(1, Math.ceil(((modeStatus.maintenanceUntil || 0) - Date.now()) / 60000));
@@ -476,8 +558,50 @@ $('btnMaint').onclick = async () => {
   modeStatus = await api('/mode', { method: 'POST', body: { mode: target } });
   renderMode();
 };
+$('btnOffline').onclick = async () => {
+  const offline = modeStatus?.mode === 'offline';
+  if (!offline && !confirm('下线后会关闭电视 kiosk，且重启电脑后仍保持下线。后台遥控器继续运行，可随时重新上线。继续？')) return;
+  modeStatus = await api('/mode', { method: 'POST', body: { mode: offline ? 'normal' : 'offline' } });
+  renderMode();
+};
 // 倒计时每分钟刷新一次
 setInterval(() => { if (modeStatus?.mode === 'maintenance') renderMode(); }, 30000);
+
+async function refreshAutostart() {
+  autostartStatus = await api('/autostart');
+  const row = $('autostartRow');
+  if (!autostartStatus.supported) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  $('autostartLabel').textContent = `开机启动：${autostartStatus.enabled ? '已启用' : '未启用'}`;
+  $('btnAutostart').textContent = autostartStatus.enabled ? '关闭' : '启用';
+}
+$('btnAutostart').onclick = async () => {
+  $('btnAutostart').disabled = true;
+  try {
+    autostartStatus = await api('/autostart', { method: 'POST', body: { enabled: !autostartStatus?.enabled } });
+    await refreshAutostart();
+  } catch (e) { alert('配置失败：' + e.message); }
+  finally { $('btnAutostart').disabled = false; }
+};
+
+$('btnPassword').onclick = () => {
+  $('currentPassword').value = ''; $('newPassword').value = ''; $('confirmPassword').value = '';
+  $('passwordError').textContent = ''; $('passwordModal').classList.add('show');
+};
+$('passwordCancel').onclick = () => $('passwordModal').classList.remove('show');
+$('passwordSave').onclick = async () => {
+  const currentPassword = $('currentPassword').value;
+  const newPassword = $('newPassword').value;
+  if (newPassword !== $('confirmPassword').value) { $('passwordError').textContent = '两次输入的新密码不一致'; return; }
+  $('passwordSave').disabled = true;
+  try {
+    const r = await api('/password', { method: 'POST', body: { currentPassword, newPassword } });
+    token = r.token; sessionStorage.setItem('sr_token', token);
+    $('passwordModal').classList.remove('show');
+    alert('密码已修改；其他设备的旧会话已经失效。');
+  } catch (e) { $('passwordError').textContent = e.message; }
+  finally { $('passwordSave').disabled = false; }
+};
 
 // ---------- 数据 ----------
 async function refreshAll() {
@@ -502,31 +626,34 @@ async function refreshPlaylists() {
   await renderSelectedPlaylist();
 }
 async function renderSelectedPlaylist() {
-  if (!selectedPlId) { $('queueList').innerHTML = '<div class="empty">还没有节目单<br>点上方「＋」创建一个</div>'; $('plStatus').textContent = ''; return; }
+  if (!selectedPlId) { $('queueList').innerHTML = '<div class="empty">还没有频道<br>点上方「＋」创建一个</div>'; $('plStatus').textContent = ''; return; }
   const r = await api('/playlists/' + selectedPlId);
   renderQueue(r.playlist);
 }
 
-// ---------- 节目单管理栏 ----------
+// ---------- 频道管理栏 ----------
 function renderPlBar() {
   const sel = $('plSelect');
   sel.innerHTML = '';
   if (!playlists.length) {
-    sel.innerHTML = '<option value="">（无节目单）</option>';
+    sel.innerHTML = '<option value="">（无频道）</option>';
   }
   for (const p of playlists) {
     const opt = document.createElement('option');
     opt.value = p.id;
-    opt.textContent = (p.active ? '▶ ' : '') + p.name + `（${p.count}）` + (p.loop ? ' 🔁' : '');
+    opt.textContent = (p.active ? '▶ ' : '') + (p.enabled ? '● ' : '○ ') + p.name + `（${p.count}）` + (p.loop ? ' 🔁' : '');
     sel.appendChild(opt);
   }
   sel.value = selectedPlId || '';
   const active = playlists.find(p => p.active);
   $('plStatus').textContent = active
-    ? `正在播出「${active.name}」` + (state?.current ? `，第 ${(state.current.index ?? 0) + 1} / ${active.count} 个` : '，待机中')
-    : '当前没有播出中的节目单';
+    ? `当前频道「${active.name}」` + (state?.current ? `，第 ${(state.current.index ?? 0) + 1} / ${active.count} 个` : '，待机中')
+    : '当前没有选择频道';
   const selPl = playlists.find(p => p.id === selectedPlId);
   $('plLoop').checked = !!(selPl && selPl.loop);
+  $('plEnabled').checked = !!selPl?.enabled;
+  $('plVod').checked = !!selPl?.allowOnDemand;
+  $('plAuto').checked = selPl ? selPl.autoPlay !== false : true;
 }
 $('plSelect').onchange = async () => { selectedPlId = $('plSelect').value || null; renderPlBar(); await renderSelectedPlaylist(); };
 
@@ -536,10 +663,42 @@ $('plLoop').onchange = async () => {
   await refreshPlaylists();
 };
 
+async function saveChannelOptions() {
+  if (!selectedPlId) return;
+  await api(`/playlists/${selectedPlId}/options`, { method: 'POST', body: {
+    enabled: $('plEnabled').checked,
+    allowOnDemand: $('plVod').checked,
+    autoPlay: $('plAuto').checked
+  } });
+  await refreshPlaylists();
+}
+$('plEnabled').onchange = saveChannelOptions;
+$('plVod').onchange = saveChannelOptions;
+$('plAuto').onchange = saveChannelOptions;
+
 $('btnExport').onclick = () => { window.open('/api/export.md', '_blank'); };
+$('btnAssetExport').onclick = () => { window.open('/api/assets/export', '_blank'); };
+$('btnAssetImport').onclick = () => { $('assetImportFile').value = ''; $('assetImportFile').click(); };
+$('assetImportFile').onchange = async () => {
+  const file = $('assetImportFile').files[0];
+  if (!file) return;
+  let document;
+  try { document = JSON.parse(await file.text()); }
+  catch { alert('文件不是有效的 JSON'); return; }
+  let mode = 'merge';
+  if (!confirm('默认“合并”：保留现有资产，并加入文件中的频道和合集。\n\n点“确定”合并；点“取消”可继续选择完整替换。')) {
+    if (!confirm('完整替换会用文件中的资产替换当前频道、合集和时刻表。系统会先保留历史备份。确定替换吗？')) return;
+    mode = 'replace';
+  }
+  try {
+    const result = await api('/assets/import', { method: 'POST', body: { document, mode } });
+    await refreshAll();
+    alert(`资产已${mode === 'merge' ? '合并' : '恢复'}：${result.playlists} 个频道、${result.collections} 个合集。${result.binding.unresolved ? `\n有 ${result.binding.unresolved} 个本地文件尚未在当前片库找到。` : ''}`);
+  } catch (e) { alert('导入失败：' + e.message); }
+};
 
 $('btnPlNew').onclick = async () => {
-  const name = prompt('节目单名称', '周末纪录片之夜');
+  const name = prompt('频道名称', '周末纪录片频道');
   if (name === null) return;
   const r = await api('/playlists', { method: 'POST', body: { name } });
   selectedPlId = r.playlist.id;
@@ -548,7 +707,7 @@ $('btnPlNew').onclick = async () => {
 $('btnPlRename').onclick = async () => {
   const cur = playlists.find(p => p.id === selectedPlId);
   if (!cur) return;
-  const name = prompt('重命名节目单', cur.name);
+  const name = prompt('重命名频道', cur.name);
   if (name === null) return;
   await api(`/playlists/${cur.id}/rename`, { method: 'POST', body: { name } });
   await refreshPlaylists();
@@ -556,7 +715,7 @@ $('btnPlRename').onclick = async () => {
 $('btnPlDelete').onclick = async () => {
   const cur = playlists.find(p => p.id === selectedPlId);
   if (!cur) return;
-  const warn = cur.active ? '这是正在播出的节目单，删除后电视将停播待机。确定删除？' : `删除节目单「${cur.name}」？`;
+  const warn = cur.active ? '这是当前频道，删除后电视将进入待机。确定删除？' : `删除频道「${cur.name}」？`;
   if (!confirm(warn)) return;
   await api('/playlists/' + cur.id, { method: 'DELETE' });
   selectedPlId = null;
@@ -568,12 +727,12 @@ $('btnPlActivate').onclick = async () => {
   await refreshAll();
 };
 
-// ---------- 节目单条目 ----------
+// ---------- 频道节目 ----------
 function renderQueue(playlist) {
   const list = $('queueList');
   const items = playlist.items;
   const isActive = playlist.active;
-  list.innerHTML = items.length ? '' : '<div class="empty">节目单为空<br>点「＋ 添加节目」贴链接或从片库挑选</div>';
+  list.innerHTML = items.length ? '' : '<div class="empty">频道为空<br>点「＋ 添加节目」贴链接或从片库挑选</div>';
   const curQid = isActive ? state?.current?.qid : null;
   items.forEach((it, i) => {
     const div = document.createElement('div');
@@ -590,14 +749,25 @@ function renderQueue(playlist) {
     } else {
       meta += cacheBadgeHtml(it);
     }
+    const timing = `${it.startTime ? ` · 🕐 ${it.startTime}` : ''}${it.maxPlaySeconds ? ` · ⏱ 最多 ${fmtTime(it.maxPlaySeconds)}` : ''}`;
     div.innerHTML = `<div class="t"><div class="name">${i + 1}. ${badge}${esc(it.title)}</div>
-      <div class="meta">${meta}</div></div>`;
+      <div class="meta">${meta}${timing}</div></div>`;
     const mk = (txt, title, fn, cls) => {
       const b = document.createElement('button');
       b.textContent = txt; b.title = title; if (cls) b.className = cls;
       b.onclick = fn; div.appendChild(b);
     };
     if (isActive) mk('▶', '点播这一个', async () => { await api('/control', { method: 'POST', body: { action: 'jump', qid: it.qid } }); });
+    mk('🕐', '设置指定开播时间和播放上限', async () => {
+      const startTime = prompt('指定每日开播时间（HH:MM，留空表示按顺序播放）', it.startTime || '');
+      if (startTime === null) return;
+      const maxPlaySeconds = prompt('播放上限（秒，留空表示播到视频自然结束）', it.maxPlaySeconds || '');
+      if (maxPlaySeconds === null) return;
+      try {
+        await api(`/playlists/${playlist.id}/items/${it.qid}/timing`, { method: 'POST', body: { startTime, maxPlaySeconds } });
+        await refreshPlaylists();
+      } catch (e) { alert('设置失败：' + e.message); }
+    });
     // 缓存失败的网页条目：提供重试按钮
     const ce = it.type === 'web' ? cacheBrief.find(c => c.url === it.url) : null;
     if (ce && ce.status === 'failed') {
@@ -616,7 +786,7 @@ function renderQueue(playlist) {
 // ---------- 添加节目弹窗 ----------
 $('btnAddItem').onclick = async () => {
   const cur = playlists.find(p => p.id === selectedPlId);
-  if (!cur) { alert('先创建一个节目单'); return; }
+  if (!cur) { alert('先创建一个频道'); return; }
   $('addTarget').textContent = cur.name + (cur.active ? '（播出中）' : '');
   $('addModal').classList.add('show');
   await renderPickList();
@@ -657,23 +827,115 @@ async function addLink() {
 async function renderPickList() {
   const r = await api('/library');
   const box = $('pickList');
-  box.innerHTML = r.items.length ? '' : '<div class="empty">片库为空<br>先去「片库」页添加媒体目录</div>';
-  for (const it of r.items) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.style.cursor = 'default';
-    row.innerHTML = `<div class="t" style="flex:1;min-width:0"><div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.title)}</div>
-      <div style="font-size:12px;color:var(--sub);margin-top:2px">${esc(it.relPath)} · ${fmtSize(it.size)}</div></div>`;
-    const btn = document.createElement('button');
-    btn.className = 'add-one';
-    btn.textContent = '＋';
-    btn.onclick = async () => {
-      await addToSelected({ mediaId: it.id });
-      btn.textContent = '✓'; btn.classList.add('done');
-    };
-    row.appendChild(btn);
-    box.appendChild(row);
+  renderMediaTree(box, r.items, {
+    selectable: true,
+    actionLabel: '加入频道',
+    emptyText: '片库为空\n先去「片库」页添加媒体目录',
+    onAdd: ids => addToSelected({ mediaIds: ids })
+  });
+}
+
+/** 将片库平铺数据构造成「片库根目录 → 子目录 → 文件」树。 */
+function buildMediaTree(items) {
+  const root = { dirs: new Map(), files: [] };
+  const dir = (parent, key, name) => {
+    if (!parent.dirs.has(key)) parent.dirs.set(key, { key, name, dirs: new Map(), files: [] });
+    return parent.dirs.get(key);
+  };
+  for (const item of items) {
+    const sourceKey = 'source:' + (item.sourceId || 'default');
+    let node = dir(root, sourceKey, item.sourceName || '片库');
+    const parts = String(item.relPath || item.title).split(/[\\/]/).filter(Boolean);
+    for (const part of parts.slice(0, -1)) node = dir(node, node.key + '/' + part, part);
+    node.files.push(item);
   }
+  return root;
+}
+
+/** 通用片库树：主片库用于浏览，加入弹窗额外支持勾选文件/整目录。 */
+function renderMediaTree(container, items, options = {}) {
+  container.innerHTML = '';
+  if (!items.length) {
+    container.innerHTML = `<div class="empty">${esc(options.emptyText || '片库为空').replace(/\n/g, '<br>')}</div>`;
+    return;
+  }
+  const tree = buildMediaTree(items);
+  const selected = new Set();
+  const dirChecks = [];
+  const wrapper = document.createElement('div');
+  wrapper.className = 'media-tree';
+  let addBtn = null, selectedLabel = null;
+
+  const descendantIds = node => [
+    ...node.files.map(f => f.id),
+    ...[...node.dirs.values()].flatMap(descendantIds)
+  ];
+  const sortedDirs = node => [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+  const refreshChecks = () => {
+    wrapper.querySelectorAll('input[data-file-id]').forEach(input => { input.checked = selected.has(input.dataset.fileId); });
+    for (const d of dirChecks) {
+      const count = d.ids.filter(id => selected.has(id)).length;
+      d.input.checked = count === d.ids.length && count > 0;
+      d.input.indeterminate = count > 0 && count < d.ids.length;
+    }
+    if (selectedLabel) selectedLabel.textContent = `已选择 ${selected.size} 个文件`;
+    if (addBtn) addBtn.disabled = selected.size === 0;
+  };
+
+  if (options.selectable) {
+    const bar = document.createElement('div'); bar.className = 'tree-selectbar';
+    selectedLabel = document.createElement('span'); selectedLabel.textContent = '已选择 0 个文件';
+    addBtn = document.createElement('button'); addBtn.textContent = options.actionLabel || '加入已选'; addBtn.disabled = true;
+    addBtn.onclick = async () => {
+      if (!selected.size) return;
+      addBtn.disabled = true; addBtn.textContent = '正在加入…';
+      try {
+        await options.onAdd([...selected]);
+        selected.clear(); refreshChecks();
+        addBtn.textContent = '已加入';
+        setTimeout(() => { if (addBtn.isConnected) addBtn.textContent = options.actionLabel || '加入已选'; }, 1000);
+      } catch (e) { alert('添加失败：' + e.message); addBtn.textContent = options.actionLabel || '加入已选'; refreshChecks(); }
+    };
+    bar.append(selectedLabel, addBtn); container.appendChild(bar);
+  }
+
+  const renderDir = (node, depth = 0) => {
+    const details = document.createElement('details'); details.open = depth < 1;
+    const summary = document.createElement('summary');
+    if (options.selectable) {
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox';
+      const ids = descendantIds(node); dirChecks.push({ input: checkbox, ids });
+      checkbox.onclick = e => e.stopPropagation();
+      checkbox.onchange = () => {
+        for (const id of ids) checkbox.checked ? selected.add(id) : selected.delete(id);
+        refreshChecks();
+      };
+      summary.appendChild(checkbox);
+    }
+    const label = document.createElement('span'); label.textContent = `📁 ${node.name}（${descendantIds(node).length}）`;
+    summary.appendChild(label); details.appendChild(summary);
+    for (const child of sortedDirs(node)) details.appendChild(renderDir(child, depth + 1));
+    for (const item of [...node.files].sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))) {
+      const row = document.createElement('div'); row.className = 'tree-file';
+      if (options.selectable) {
+        const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.fileId = item.id;
+        checkbox.onchange = () => { checkbox.checked ? selected.add(item.id) : selected.delete(item.id); refreshChecks(); };
+        row.appendChild(checkbox);
+      }
+      const name = document.createElement('div'); name.className = 'tree-name';
+      name.innerHTML = `<div class="tree-title">🎬 ${esc(item.title)}</div><div class="tree-meta">${esc(item.ext)} · ${fmtSize(item.size)}</div>`;
+      row.appendChild(name);
+      if (options.onFileAction) {
+        const button = document.createElement('button'); button.className = 'tree-add'; button.textContent = '＋'; button.title = '加入当前频道';
+        button.onclick = () => options.onFileAction(item, button); row.appendChild(button);
+      }
+      details.appendChild(row);
+    }
+    return details;
+  };
+  for (const source of sortedDirs(tree)) wrapper.appendChild(renderDir(source));
+  container.appendChild(wrapper);
+  refreshChecks();
 }
 
 // 合集抽一集：挑选合集
@@ -707,7 +969,7 @@ async function refreshCollectionsOnly() {
 
 function renderCollections() {
   const box = $('colList');
-  box.innerHTML = collectionsList.length ? '' : '<div class="empty">还没有合集<br>合集 = 连续剧式的内容包，节目单里放一格「抽一集」，每次播到自动取下一集</div>';
+  box.innerHTML = collectionsList.length ? '' : '<div class="empty">还没有合集<br>合集 = 连续剧式的内容包，频道里放一格「抽一集」，每次播到自动取下一集</div>';
   for (const c of collectionsList) {
     const div = document.createElement('div');
     div.className = 'item';
@@ -720,7 +982,7 @@ function renderCollections() {
     };
     mk('✎', '编辑合集内容', () => openColModal(c.id));
     mk('✕', '删除合集', async () => {
-      if (confirm(`删除合集「${c.name}」？节目单里引用它的条目会变成空。`)) {
+      if (confirm(`删除合集「${c.name}」？频道里引用它的条目会变成空。`)) {
         await api('/collections/' + c.id, { method: 'DELETE' });
         await refreshCollectionsOnly();
       }
@@ -735,6 +997,25 @@ $('btnColNew').onclick = async () => {
   const r = await api('/collections', { method: 'POST', body: { name } });
   await refreshCollectionsOnly();
   openColModal(r.collection.id);
+};
+
+$('btnColImport').onclick = async () => {
+  const url = prompt('粘贴网站合集、播放列表或 B 站分 P 视频链接');
+  if (url === null || !url.trim()) return;
+  const btn = $('btnColImport');
+  btn.disabled = true;
+  btn.textContent = '正在解析合集…';
+  try {
+    const r = await api('/collections/import', { method: 'POST', body: { url: url.trim() } });
+    await refreshCollectionsOnly();
+    if (r.truncated) alert(`已导入前 ${r.imported} 集（单次最多导入 500 集）`);
+    openColModal(r.collection.id);
+  } catch (e) {
+    alert('导入失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🌐 导入网站合集';
+  }
 };
 
 async function openColModal(id) {
@@ -772,23 +1053,15 @@ async function renderColModal() {
   // 片库挑选（加入合集）
   const lib = await api('/library');
   const pick = $('colPickLocal');
-  pick.innerHTML = lib.items.length ? '<div style="font-size:13px;color:var(--sub);margin-bottom:6px">从片库加入</div>' : '';
-  for (const it of lib.items) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.style.cursor = 'default';
-    row.innerHTML = `<div class="t" style="flex:1;min-width:0"><div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.title)}</div>
-      <div style="font-size:12px;color:var(--sub);margin-top:2px">${esc(it.relPath)}</div></div>`;
-    const btn = document.createElement('button');
-    btn.className = 'add-one';
-    btn.textContent = '＋';
-    btn.onclick = async () => {
-      await api(`/collections/${c.id}/items`, { method: 'POST', body: { mediaId: it.id } });
+  renderMediaTree(pick, lib.items, {
+    selectable: true,
+    actionLabel: '加入合集',
+    emptyText: '片库为空',
+    onAdd: async ids => {
+      await api(`/collections/${c.id}/items`, { method: 'POST', body: { mediaIds: ids } });
       await renderColModal(); await refreshCollectionsOnly();
-    };
-    row.appendChild(btn);
-    pick.appendChild(row);
-  }
+    }
+  });
 }
 
 $('btnColAddLink').onclick = async () => {
@@ -835,10 +1108,10 @@ function schedDaysAdd(d) { schedDaysSet().add(d); }
 function schedDaysDelete(d) { schedDaysSet().delete(d); }
 
 function renderSchedules() {
-  // 节目单下拉
+  // 频道下拉
   const sel = $('schedPl');
   const prev = sel.value;
-  sel.innerHTML = playlists.length ? '' : '<option value="">（先创建节目单）</option>';
+  sel.innerHTML = playlists.length ? '' : '<option value="">（先创建频道）</option>';
   for (const p of playlists) {
     const opt = document.createElement('option');
     opt.value = p.id; opt.textContent = p.name;
@@ -864,7 +1137,7 @@ function renderSchedules() {
 
 $('btnSchedAdd').onclick = async () => {
   const playlistId = $('schedPl').value;
-  if (!playlistId) { alert('先创建节目单'); return; }
+  if (!playlistId) { alert('先创建频道'); return; }
   const days = [...schedDaysSet()].sort();
   if (!days.length) { alert('至少选一天'); return; }
   try {
@@ -882,23 +1155,15 @@ async function renderLibrary(rescan) {
   const dirs = r.mediaDirs || [];
   renderDirChips(dirs);
   $('libCount').textContent = r.items.length + ' 部影片';
-  $('libList').innerHTML = r.items.length ? ''
-    : '<div class="empty">片库为空<br>点上方「＋ 添加目录」，在网页上挑选影片所在文件夹</div>';
-  for (const it of r.items) {
-    const div = document.createElement('div');
-    div.className = 'item';
-    div.innerHTML = `<div class="t"><div class="name">${esc(it.title)}</div>
-      <div class="meta">${esc(it.relPath)} · ${fmtSize(it.size)}</div></div>`;
-    const btn = document.createElement('button');
-    btn.textContent = '＋';
-    btn.title = '加入播出中节目单';
-    btn.onclick = async () => {
-      try { await api('/queue', { method: 'POST', body: { mediaId: it.id } }); await refreshPlaylists(); }
-      catch (e) { alert(e.message); }
-    };
-    div.appendChild(btn);
-    $('libList').appendChild(div);
-  }
+  renderMediaTree($('libList'), r.items, {
+    emptyText: '片库为空\n点上方「＋ 添加目录」，在网页上挑选影片所在文件夹',
+    onFileAction: async (item, button) => {
+      try {
+        await api('/queue', { method: 'POST', body: { mediaId: item.id } });
+        button.textContent = '✓'; await refreshPlaylists();
+      } catch (e) { alert(e.message); }
+    }
+  });
 }
 
 function renderDirChips(dirs) {
@@ -970,7 +1235,7 @@ function renderNow() {
   const activePl = playlists.find(p => p.active);
   $('nowTitle').textContent = cur ? ((cur.type === 'web' ? '🌐 ' : cur.collectionId ? '📚 ' : '') + cur.title) : '—';
   $('nowStatus').textContent = !cur
-    ? (activePl ? `「${activePl.name}」待机中` : '待机中 — 去节目单页创建并播出节目单')
+    ? (activePl ? `「${activePl.name}」待机中` : '待机中 — 去频道页创建并启用频道')
     : `${({ playing: '▶ 播放中', paused: '⏸ 已暂停', idle: '⏹ 待机' })[state.status] || state.status} · 「${activePl?.name || ''}」第 ${(cur.index ?? 0) + 1} / ${state.queueLength} 个`;
   $('btnPlay').textContent = state.status === 'playing' ? '⏸' : '▶';
   $('vol').value = state.volume;
@@ -1039,6 +1304,7 @@ async function boot() {
   renderSchedDays();
   await refreshAll();
   await refreshMode();
+  await refreshAutostart();
 }
 (async () => {
   try { await api('/state'); hideLogin(); boot(); }   // 已有会话

@@ -9,20 +9,37 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { COOKIE, Auth } = require('../auth');
 const { browse } = require('../browse');
 const { resolveTitle } = require('../webtitle');
+const { createAssetDocument, validateAssetDocument } = require('../assets');
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function apiRouter({ auth, library, queue, playlists, collections, scheduler, browserctl, cache, onDirsChange, onPersist, applySchedulerTick }) {
+function apiRouter({ auth, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
   const router = express.Router();
-  router.use(express.json());
+  router.use(express.json({ limit: '10mb' }));
+
+  const loginFailures = new Map();
+  const cookieFor = (req, token, maxAge = 7 * 24 * 3600) => {
+    const secure = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+    return `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+  };
 
   router.post('/login', (req, res) => {
+    const key = req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const attempt = loginFailures.get(key);
+    if (attempt?.blockedUntil > now) return res.status(429).json({ error: '尝试过多，请稍后再试' });
     const token = auth.login(String(req.body?.password ?? ''));
-    if (!token) return res.status(401).json({ error: 'wrong password' });
-    res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`);
+    if (!token) {
+      const failures = (attempt?.failures || 0) + 1;
+      loginFailures.set(key, { failures, blockedUntil: failures >= 5 ? now + 15 * 60000 : 0 });
+      return res.status(401).json({ error: 'wrong password' });
+    }
+    loginFailures.delete(key);
+    res.setHeader('Set-Cookie', cookieFor(req, token));
     res.json({ ok: true, token });
   });
 
@@ -36,9 +53,35 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
   // ---- 以下需要登录 ----
   router.use(auth.middleware());
 
+  router.post('/password', (req, res) => {
+    const current = String(req.body?.currentPassword ?? '');
+    const next = String(req.body?.newPassword ?? '');
+    if (!auth.verifyPassword(current)) return res.status(403).json({ error: '当前密码不正确' });
+    if (next.length < 8 || next.length > 128) return res.status(400).json({ error: '新密码长度需为 8-128 个字符' });
+    if (next === current) return res.status(400).json({ error: '新密码不能与当前密码相同' });
+    const hash = Auth.hashPassword(next);
+    try { if (onPasswordChange) onPasswordChange(hash); }
+    catch (e) { return res.status(500).json({ error: '密码保存失败：' + e.message }); }
+    auth.setPasswordHash(hash);
+    const token = auth.createSession();
+    res.setHeader('Set-Cookie', cookieFor(req, token));
+    res.json({ ok: true, token });
+  });
+
+  router.get('/autostart', async (req, res) => {
+    res.json(autostart ? await autostart.status() : { supported: false, enabled: false });
+  });
+
+  router.post('/autostart', async (req, res) => {
+    if (!autostart) return res.status(503).json({ error: '开机启动管理不可用' });
+    const result = await autostart.setEnabled(!!req.body?.enabled);
+    if (result.error) return res.status(500).json(result);
+    res.json(result);
+  });
+
   router.get('/state', (req, res) => {
     res.json({
-      state: queue.getPublicState(),
+      state: { ...queue.getPublicState(), channels: playlists.tvList(), selectedChannelId: playlists.activeId },
       queue: queue.queue,
       playlists: playlists.list(),
       activeId: playlists.activeId,
@@ -51,7 +94,7 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
   function schedulesWithNames() {
     return scheduler.list().map(r => ({
       ...r,
-      playlistName: playlists.get(r.playlistId)?.name || '（节目单已删除）'
+      playlistName: playlists.get(r.playlistId)?.name || '（频道已删除）'
     }));
   }
 
@@ -138,15 +181,36 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
   router.delete('/playlists/:id', (req, res) => {
     const r = playlists.remove(req.params.id);
     if (!r) return res.status(404).json({ error: 'not found' });
-    if (r.wasActive) queue.loadPlaylist([]); // 删除播出中的节目单 → 直播队列清空待机
+    if (r.wasActive) {
+      const fallback = playlists.playlists.find(x => x.enabled);
+      if (fallback && selectChannel) selectChannel(fallback.id);
+      else queue.loadPlaylist([]);
+    }
     res.json({ ok: true });
   });
 
   router.post('/playlists/:id/activate', (req, res) => {
-    const p = playlists.activate(req.params.id);
+    const p = playlists.get(req.params.id);
     if (!p) return res.status(404).json({ error: 'not found' });
-    queue.loadPlaylist(p.items, { loop: p.loop }); // 共享数组引用，此后编辑即直播
+    if (!p.enabled) playlists.setOptions(p.id, { enabled: true });
+    if (selectChannel) selectChannel(p.id, { play: true });
+    else { playlists.activate(p.id); queue.loadPlaylist(p.items, { loop: p.loop }); }
     res.json({ ok: true, state: queue.getPublicState() });
+  });
+
+  router.post('/playlists/:id/options', (req, res) => {
+    const p = playlists.get(req.params.id);
+    if (!p) return res.status(404).json({ error: 'not found' });
+    const autoPlayChanged = typeof req.body?.autoPlay === 'boolean' && req.body.autoPlay !== p.autoPlay;
+    playlists.setOptions(p.id, req.body || {});
+    if (!p.enabled && p.id === playlists.activeId) {
+      const fallback = playlists.playlists.find(x => x.enabled);
+      if (fallback && selectChannel) selectChannel(fallback.id);
+      else { playlists.activeId = null; queue.standby(); }
+    } else if (p.id === playlists.activeId && autoPlayChanged && selectChannel) {
+      selectChannel(p.id, { play: p.autoPlay !== false });
+    }
+    res.json({ ok: true, channel: playlists.list().find(x => x.id === p.id) });
   });
 
   /** 循环开关；播出中的节目单立即作用于直播队列 */
@@ -188,7 +252,10 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
     return ids.map(id => {
       const item = library.get(id);
       if (!item) throw { status: 404, error: `media not found: ${id}` };
-      return { type: 'local', mediaId: item.id, title: item.title, relPath: item.relPath };
+      return {
+        type: 'local', mediaId: item.id, title: item.title, relPath: item.relPath,
+        sourceId: item.sourceId, sourceName: item.sourceName
+      };
     });
   }
 
@@ -223,6 +290,24 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
     res.json({ ok: true });
   });
 
+  router.post('/playlists/:id/items/:qid/timing', (req, res) => {
+    const { maxPlaySeconds, startTime } = req.body || {};
+    if (maxPlaySeconds !== null && maxPlaySeconds !== '' && maxPlaySeconds !== undefined) {
+      const seconds = Number(maxPlaySeconds);
+      if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 86400) {
+        return res.status(400).json({ error: '播放上限需为 1-86400 秒，留空表示不限制' });
+      }
+    }
+    if (startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(startTime))) {
+      return res.status(400).json({ error: '指定开播时间需为 HH:MM' });
+    }
+    if (!playlists.updateItem(req.params.id, req.params.qid, { maxPlaySeconds, startTime })) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    if (req.params.id === playlists.activeId && applyChannelTimingTick) applyChannelTimingTick();
+    res.json({ ok: true });
+  });
+
   // ---- 合集 ----
 
   router.get('/collections', (req, res) => {
@@ -232,6 +317,46 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
   router.post('/collections', (req, res) => {
     const c = collections.create(req.body?.name, req.body?.mode);
     res.status(201).json({ collection: { id: c.id, name: c.name, mode: c.mode, count: 0, cursor: 0 } });
+  });
+
+  /** 从网站播放列表/分 P 视频创建合集。解析成功后才落库，失败不留下空合集。 */
+  router.post('/collections/import', async (req, res) => {
+    let url;
+    try { url = new URL(String(req.body?.url || '')); }
+    catch { return res.status(400).json({ error: '链接格式不正确' }); }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return res.status(400).json({ error: '只支持 http/https 链接' });
+    }
+    if (!siteCollectionImporter) return res.status(503).json({ error: '网站合集导入不可用' });
+
+    let result;
+    try { result = await siteCollectionImporter(url.toString()); }
+    catch (e) { return res.status(502).json({ error: e.message || '解析网站合集失败' }); }
+    if (!result?.ok || !Array.isArray(result.entries) || !result.entries.length) {
+      return res.status(422).json({ error: result?.error || '网站没有返回可导入的剧集' });
+    }
+
+    const items = result.entries.flatMap(entry => {
+      try {
+        const itemUrl = new URL(String(entry?.url || ''));
+        if (itemUrl.protocol !== 'http:' && itemUrl.protocol !== 'https:') return [];
+        return [{
+          type: 'web', url: itemUrl.toString(),
+          title: String(entry?.title || itemUrl.host).trim() || itemUrl.host,
+          relPath: itemUrl.host
+        }];
+      } catch { return []; }
+    });
+    if (!items.length) return res.status(422).json({ error: '网站没有返回有效的剧集链接' });
+
+    const requestedName = String(req.body?.name || '').trim();
+    const c = collections.create(requestedName || result.title || '网站合集', req.body?.mode);
+    const added = collections.addItems(c.id, items);
+    res.status(201).json({
+      collection: { id: c.id, name: c.name, mode: c.mode, count: added.length, cursor: 0 },
+      imported: added.length,
+      truncated: !!result.truncated
+    });
   });
 
   router.get('/collections/:id', (req, res) => {
@@ -291,7 +416,7 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
 
   router.post('/schedules', (req, res) => {
     const { playlistId, days, start, end, loop } = req.body || {};
-    if (!playlists.get(String(playlistId || ''))) return res.status(404).json({ error: '节目单不存在' });
+    if (!playlists.get(String(playlistId || ''))) return res.status(404).json({ error: '频道不存在' });
     const r = scheduler.add({ playlistId, days, start, end, loop });
     if (r.error) return res.status(400).json({ error: r.error });
     persistNow();
@@ -307,6 +432,87 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
   });
 
   function persistNow() { if (onPersist) onPersist(); }
+
+  // ---- 无损资产备份 / 恢复 ----
+
+  const assetState = () => ({
+    ...playlists.serialize(),
+    ...collections.serialize(),
+    settings: { schedules: scheduler.serialize() }
+  });
+
+  router.get('/assets/export', (req, res) => {
+    res.setHeader('Content-Disposition', `attachment; filename="showrunner-assets-${Date.now()}.showrunner.json"`);
+    res.json(createAssetDocument(assetState()));
+  });
+
+  function rebindLocalItems(document) {
+    const media = library.list();
+    let rebound = 0, unresolved = 0;
+    const visit = item => {
+      if (!item || item.type === 'web' || item.type === 'collection' || !item.relPath) return;
+      const exact = media.find(m => m.relPath === item.relPath && (!item.sourceName || m.sourceName === item.sourceName));
+      const candidates = exact ? [exact] : media.filter(m => m.relPath === item.relPath);
+      if (candidates.length === 1) {
+        const found = candidates[0];
+        if (item.mediaId !== found.id) rebound++;
+        item.mediaId = found.id;
+        item.sourceId = found.sourceId;
+        item.sourceName = found.sourceName;
+      } else unresolved++;
+    };
+    for (const p of document.playlists) p.items.forEach(visit);
+    for (const c of document.collections) c.items.forEach(visit);
+    return { rebound, unresolved };
+  }
+
+  router.post('/assets/import', (req, res) => {
+    let document;
+    try { document = validateAssetDocument(req.body?.document || req.body); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    const mode = req.body?.mode === 'replace' ? 'replace' : 'merge';
+    const binding = rebindLocalItems(document);
+
+    if (mode === 'replace') {
+      playlists.playlists = document.playlists;
+      playlists.activeId = document.playlists.some(p => p.id === document.activeId) ? document.activeId : (document.playlists[0]?.id || null);
+      collections.collections = document.collections.map(c => ({ ...c, randomPool: null }));
+      scheduler.rules = document.schedules;
+    } else {
+      const collectionIds = new Set(collections.collections.map(c => c.id));
+      const collectionMap = new Map();
+      for (const c of document.collections) {
+        const old = c.id;
+        if (collectionIds.has(c.id)) c.id = crypto.randomUUID();
+        collectionIds.add(c.id);
+        collectionMap.set(old, c.id);
+        collections.collections.push({ ...c, randomPool: null });
+      }
+      const playlistIds = new Set(playlists.playlists.map(p => p.id));
+      const playlistMap = new Map();
+      for (const p of document.playlists) {
+        const old = p.id;
+        if (playlistIds.has(p.id)) p.id = crypto.randomUUID();
+        playlistIds.add(p.id);
+        playlistMap.set(old, p.id);
+        for (const item of p.items) if (item.type === 'collection') item.collectionId = collectionMap.get(item.collectionId) || item.collectionId;
+        playlists.playlists.push(p);
+      }
+      const scheduleIds = new Set(scheduler.rules.map(r => r.id));
+      for (const rule of document.schedules) {
+        if (scheduleIds.has(rule.id)) rule.id = crypto.randomUUID();
+        rule.playlistId = playlistMap.get(rule.playlistId) || rule.playlistId;
+        scheduleIds.add(rule.id);
+        scheduler.rules.push(rule);
+      }
+    }
+
+    // 重新挂接当前频道数组，避免替换后直播队列仍引用旧数组。
+    if (playlists.activeId) selectChannel(playlists.activeId, { play: false });
+    else queue.clear();
+    persistNow();
+    res.json({ ok: true, mode, binding, playlists: document.playlists.length, collections: document.collections.length, schedules: document.schedules.length });
+  });
 
   // ---- 节目表导出 ----
 
@@ -342,14 +548,14 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
     if (!d.schedules.length) {
       L.push('（无定时规则——全天手动播出）');
     } else {
-      L.push('| 时段 | 星期 | 节目单 | 循环 |');
+      L.push('| 时段 | 星期 | 频道 | 循环 |');
       L.push('|---|---|---|---|');
       for (const r of d.schedules) {
         L.push(`| ${r.start}–${r.end} | ${r.days.map(d2 => DAY_NAMES[d2]).join('、')} | ${r.playlistName} | ${r.loop ? '是' : '否'} |`);
       }
     }
     L.push('');
-    L.push('## 节目单');
+    L.push('## 频道');
     for (const p of d.playlists) {
       L.push('');
       L.push(`### ${p.active ? '▶ ' : ''}${p.name}（${p.count} 个${p.loop ? '，循环' : ''}）`);
@@ -392,7 +598,7 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
 
   router.post('/queue', async (req, res) => {
     if (!playlists.active()) {
-      return res.status(409).json({ error: '还没有播出中的节目单，请先在「节目单」页创建并播出一个' });
+      return res.status(409).json({ error: '还没有当前频道，请先在「频道」页创建并切换到一个频道' });
     }
     let items;
     try { items = await buildItems(req.body); }
@@ -416,15 +622,34 @@ function apiRouter({ auth, library, queue, playlists, collections, scheduler, br
     res.json({ ok: true });
   });
 
+  // ---- 应用内自更新 ----
+
+  router.get('/update/status', (req, res) => {
+    if (!updater) return res.status(503).json({ error: 'updater unavailable' });
+    res.json(updater.status());
+  });
+
+  router.post('/update/check', async (req, res) => {
+    if (!updater) return res.status(503).json({ error: 'updater unavailable' });
+    res.json(await updater.check());
+  });
+
+  // 一键升级：下载 → 派生更新器 → 本进程退出重启（客户端应预期连接中断）
+  router.post('/update/apply', async (req, res) => {
+    if (!updater) return res.status(503).json({ error: 'updater unavailable' });
+    const st = await updater.apply();
+    res.json(st);
+  });
+
   // ---- 维护模式（kiosk 托管）----
 
   router.get('/mode', (req, res) => {
     res.json(browserctl.status());
   });
 
-  router.post('/mode', (req, res) => {
-    const s = browserctl.setMode(String(req.body?.mode));
-    if (!s) return res.status(400).json({ error: 'mode 只能是 normal 或 maintenance' });
+  router.post('/mode', async (req, res) => {
+    const s = await browserctl.setMode(String(req.body?.mode));
+    if (!s) return res.status(400).json({ error: 'mode 只能是 normal、maintenance 或 offline' });
     res.json(s);
   });
 

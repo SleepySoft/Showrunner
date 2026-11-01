@@ -46,6 +46,25 @@ test('非播出中节目单的条目编辑', () => {
   assert.equal(m.addItem('ghost', {}), null);
 });
 
+test('频道启用、点播权限、纯点播和节目时间设置', () => {
+  const m = new PlaylistManager(null);
+  const p = m.create('少儿频道');
+  const item = m.addItem(p.id, { type: 'web', url: 'https://x/1', title: '第一集' });
+  m.setOptions(p.id, { enabled: true, allowOnDemand: true, autoPlay: false });
+  m.updateItem(p.id, item.qid, { startTime: '18:30', maxPlaySeconds: 1200 });
+
+  const summary = m.list()[0];
+  assert.equal(summary.enabled, true);
+  assert.equal(summary.allowOnDemand, true);
+  assert.equal(summary.autoPlay, false);
+  assert.equal(m.get(p.id).items[0].startTime, '18:30');
+  assert.equal(m.get(p.id).items[0].maxPlaySeconds, 1200);
+  assert.equal(m.tvList()[0].items[0].title, '第一集');
+
+  m.setOptions(p.id, { allowOnDemand: false });
+  assert.equal(m.tvList()[0].items, undefined); // 不允许点播时不向电视暴露目录
+});
+
 test('持久化往返 + 损坏 activeId 兜底', () => {
   const m = new PlaylistManager(null);
   const p = m.create('P');
@@ -126,11 +145,11 @@ test('向非播出节目单添加条目不影响直播队列', async () => {
   assert.equal(r.queue.length, 0); // 直播队列不受影响
 });
 
-test('播出节目单：队列装入、回到待机', async () => {
+test('切换到自动播出频道后装入队列并立即播放', async () => {
   const r = await (await post(`/api/playlists/${plA.id}/activate`)).json();
   assert.equal(r.ok, true);
   assert.equal(r.state.current.title, '本地片');
-  assert.equal(r.state.status, 'idle');
+  assert.equal(r.state.status, 'playing');
 
   const s = await (await authed('/api/state')).json();
   assert.equal(s.activeId, plA.id);
@@ -162,6 +181,53 @@ test('切换播出到另一个节目单', async () => {
   const s = await (await authed('/api/state')).json();
   assert.equal(s.queue.length, 1);
   assert.equal(s.activeId, plB.id);
+  assert.equal(s.state.status, 'playing');
+});
+
+test('频道选项、纯点播与电视端频道摘要', async () => {
+  let r = await post(`/api/playlists/${plB.id}/options`, { enabled: true, allowOnDemand: true, autoPlay: false });
+  assert.equal(r.status, 200);
+  srv.selectChannel(plB.id);
+  assert.equal(srv.queue.getPublicState().status, 'idle');
+  assert.equal(srv.queue.getPublicState().waiting.reason, 'on-demand');
+  const tv = srv.getTvState();
+  assert.equal(tv.channels.length, 1);
+  assert.equal(tv.channels[0].allowOnDemand, true);
+  assert.equal(tv.channels[0].items.length, 1);
+  assert.equal(srv.playOnDemand(tv.channels[0].items[0].qid), true);
+  assert.equal(srv.queue.getPublicState().status, 'playing');
+
+  // 恢复自动播出，避免影响后续旧用例。
+  r = await post(`/api/playlists/${plB.id}/options`, { enabled: true, allowOnDemand: false, autoPlay: true });
+  assert.equal(r.status, 200);
+  srv.selectChannel(plB.id, { play: false });
+});
+
+test('节目指定开播时间、提前结束待机与播放上限强切', async () => {
+  const detail = await (await authed(`/api/playlists/${plB.id}`)).json();
+  const item = detail.playlist.items[0];
+  let r = await post(`/api/playlists/${plB.id}/items/${item.qid}/timing`, { startTime: '10:00', maxPlaySeconds: 30 });
+  assert.equal(r.status, 200);
+
+  srv.applyChannelTimingTick(new Date(2026, 0, 2, 9, 0));
+  let state = srv.queue.getPublicState();
+  assert.equal(state.current, null);
+  assert.equal(state.waiting.nextTitle, '本地片');
+
+  srv.applyChannelTimingTick(new Date(2026, 0, 2, 10, 0));
+  state = srv.queue.getPublicState();
+  assert.equal(state.current.title, '本地片');
+  assert.equal(state.status, 'playing');
+
+  srv.queue.reportPosition(30, 100);
+  assert.equal(srv.applyChannelTimingTick(new Date(2026, 0, 2, 10, 1)).action, 'cutoff');
+  state = srv.queue.getPublicState();
+  assert.equal(state.current, null);
+  assert.equal(state.waiting.reason, 'schedule');
+
+  // 清除时间设置，保持后续持久化断言语义不变。
+  await post(`/api/playlists/${plB.id}/items/${item.qid}/timing`, { startTime: '', maxPlaySeconds: '' });
+  srv.selectChannel(plB.id, { play: false });
 });
 
 test('节目单操作需要登录 + 404', async () => {

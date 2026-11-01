@@ -36,7 +36,19 @@ test('列表按路径排序且不暴露绝对路径', () => {
   for (const it of items) {
     assert.ok(!('absPath' in it));
     assert.ok(it.id && it.relPath && it.size > 0);
+    assert.ok(it.sourceId && it.sourceName === 'media');
   }
+});
+
+test('多个片库根目录的同名相对文件不会互相覆盖', () => {
+  const other = path.join(tmp, 'other');
+  fs.mkdirSync(path.join(other, '纪录片'), { recursive: true });
+  fs.writeFileSync(path.join(other, '纪录片', '蓝色星球.mkv'), Buffer.alloc(10, 3));
+  const lib = new Library([mediaDir, other]);
+  const same = lib.rescan().filter(i => i.relPath === path.join('纪录片', '蓝色星球.mkv'));
+  assert.equal(same.length, 2);
+  assert.notEqual(same[0].id, same[1].id);
+  assert.notEqual(same[0].sourceId, same[1].sourceId);
 });
 
 test('ID 由相对路径决定：文件不动则 ID 稳定', () => {

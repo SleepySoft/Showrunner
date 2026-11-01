@@ -36,6 +36,17 @@ test('合集 CRUD 与序列化', () => {
   assert.equal(cm2.remove('不存在'), false);
 });
 
+test('批量加入合集只发出一次 change', () => {
+  const cm = new CollectionManager(null);
+  const c = cm.create('网站合集');
+  let changes = 0;
+  cm.on('change', () => changes++);
+  const added = cm.addItems(c.id, [localItem('E1'), localItem('E2'), localItem('E3')]);
+  assert.equal(added.length, 3);
+  assert.equal(cm.get(c.id).items.length, 3);
+  assert.equal(changes, 1);
+});
+
 test('顺序模式 takeNext 逐集推进并回卷', () => {
   const cm = new CollectionManager(null);
   const c = cm.create('纪录片');

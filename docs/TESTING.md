@@ -1,12 +1,21 @@
 # 测试说明
 
+| 视角 | 本文定位 |
+|---|---|
+| WHY | 用可重复测试保护服务器权威状态、信任边界和持久化兼容性 |
+| WHAT | 单元、集成、端到端、假进程/假网络与人工烟测边界 |
+| HOW | 运行 `npm test`，再按覆盖矩阵定位失败；真实下载使用 smoke 流程 |
+| ADR | 测试用于验证 [ADR 索引](adr/README.md) 中已接受决定的可观察后果 |
+
 ## 运行
 
 ```bash
 npm test
 ```
 
-132 个测试，全部使用 Node 内置 `node:test`，无额外测试依赖。测试全部在临时目录 + 随机端口进行，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 165 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+
+资产测试覆盖：带版本无损格式、运行态剥离、安装目录内外双保险库、内容去重与滚动历史、实时 JSON 损坏后的 `.bak` 恢复/隔离、无备份时拒绝空数据启动，以及 HTTP 导出后删除再完整恢复。
 
 ## 覆盖矩阵
 
@@ -32,9 +41,9 @@ npm test
 
 站点后缀剥离（B 站/优酷/YouTube/无后缀）、HTML 实体解码、网络失败与非 200 与无 `<title>` 的「主机+路径」退化、非法 URL 不抛异常。全部注入假 fetch，不触外网。
 
-### 单元：浏览器托管 + 集成：维护模式（`test/browserctl.test.js`，10 个）
+### 单元：浏览器托管 + 集成：维护模式（`test/browserctl.test.js`，12 个）
 
-启动即拉起 kiosk（独立 profile 参数校验）、kiosk 退出看门狗重拉、维护模式杀 kiosk + 开普通浏览器 + 回锁时间、超时自动回锁重拉、手动回锁、非法模式拒绝、`manage=false` 零副作用；集成：`GET/POST /api/mode` 切换、非法 400、未登录 401。
+启动清理遗留受控实例后拉起 kiosk、kiosk 退出看门狗重拉、维护模式先关 kiosk 再开受控普通窗口、超时/手动回锁先关维护窗口再拉唯一 kiosk、旧进程迟到退出不污染新实例、下线释放全部受控浏览器、非法模式拒绝、`manage=false` 零副作用；集成：`GET/POST /api/mode` 切换、非法 400、未登录 401。
 
 ### 单元 + 端到端：节目单（`test/playlists.test.js`，14 个）
 
@@ -92,6 +101,10 @@ CRUD 与重命名、activate/wasActive 语义、非播出节目单条目编辑�
 | 装饰 | 队列公开状态当前片带 cacheStatus/stream，本地片不受影响 |
 | 流端点 | `/cache/:key/stream` Range 206 / 未就绪 404 / 完整下载字节数校验 |
 | 删除 | remove 删条目与磁盘文件、重复删除返回 false |
+
+### 单元 + WebSocket：播放异常（`test/playback-issues.test.js`）
+
+覆盖 JSONL 日志字段、过期 `qid` 拒绝、电视端 WebSocket 异常上报、当前节目立即跳过和下一节目接续。浏览器内 20 秒冻结计时通过脚本语法检查与人工烟测验证；未来抽成可注入时钟后再补纯单元测试。
 
 ## 已知未覆盖（刻意留白）
 

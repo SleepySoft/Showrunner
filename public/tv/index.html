@@ -18,13 +18,40 @@
   #standby .icon, #webnote .icon { font-size: 64px; margin-bottom: 24px; }
   #standby .main, #webnote .main { font-size: 28px; color: #999; }
   #standby .sub, #webnote .sub { font-size: 16px; color: #555; margin-top: 12px; }
+  body.interactive { cursor: default; }
+  #channelControls {
+    position: fixed; right: 5vw; top: 10vh; bottom: 10vh; z-index: 10; display: none;
+    width: min(440px, 88vw); flex-direction: column; gap: 10px; align-items: stretch;
+    padding: 28px; border-radius: 18px; overflow-y: auto;
+    background: rgba(12,12,12,.95); color: #eee; font-family: "Microsoft YaHei", sans-serif;
+    box-shadow: 0 16px 60px rgba(0,0,0,.55);
+  }
+  #channelControls.show { display: flex; }
+  #channelControls h2 { font-size: 28px; margin-bottom: 4px; }
+  #channelControls .hint, #vodPanel .hint { color: #888; font-size: 14px; margin-bottom: 10px; }
+  #channelControls button, #vodPanel button {
+    border: 1px solid #555; background: #222; color: #ddd; border-radius: 8px;
+    padding: 15px 18px; font-size: 20px; cursor: pointer;
+  }
+  #channelControls button.on { background: #eee; color: #111; }
+  #channelControls button.focused, #vodPanel button.focused {
+    outline: 4px solid #fff; outline-offset: 2px; border-color: #fff;
+  }
+  #vodPanel {
+    position: fixed; inset: 8% 10%; z-index: 11; display: none; overflow-y: auto;
+    padding: 24px; border-radius: 16px; background: rgba(10,10,10,.96);
+    color: #eee; font-family: "Microsoft YaHei", sans-serif;
+  }
+  #vodPanel.show { display: block; }
+  #vodPanel h2 { margin-bottom: 8px; font-size: 28px; }
+  #vodPanel button { display: block; width: 100%; text-align: left; margin-bottom: 8px; }
 </style>
 </head>
 <body>
 <video id="player" playsinline></video>
 <div id="standby">
   <div class="icon">📺</div>
-  <div class="main">节目单已播完</div>
+  <div class="main">频道空闲</div>
   <div class="sub">等待家长安排新节目</div>
 </div>
 <div id="webnote">
@@ -32,11 +59,13 @@
   <div class="main" id="webTitle">网页片源</div>
   <div class="sub" id="webSub">正在准备…</div>
 </div>
+<div id="channelControls"></div>
+<div id="vodPanel"><h2 id="vodTitle">选择节目</h2><div class="hint">↑↓ 选择　← 确认　→ 返回</div><div id="vodItems"></div><button id="vodClose">返回频道</button></div>
 <script>
 'use strict';
 /*
- * 电视播放端 —— 哑终端。
- * 不展示任何片单、不响应任何输入；只向服务器询问「现在放什么」并照做。
+ * 电视播放端 —— 服务端权威的受限终端。
+ * 只允许用最小遥控器按键查看/切换已启用频道，以及点播获准披露的节目。
  * 网页片源播放服务器预下载的缓存文件；未缓存完成时黑屏等待，失败时跳过。
  */
 const video = document.getElementById('player');
@@ -44,10 +73,9 @@ const standby = document.getElementById('standby');
 const $ = id => document.getElementById(id);
 const webnote = $('webnote');
 
-// ---- 输入封锁：键鼠、右键、触摸长按一律无效 ----
-for (const ev of ['contextmenu', 'keydown', 'keyup', 'keypress', 'dblclick']) {
-  window.addEventListener(ev, e => e.preventDefault(), { capture: true });
-}
+// 浏览器右键菜单和双击全屏由 kiosk 接管；键盘只拦截下方明确支持的导航键。
+window.addEventListener('contextmenu', e => e.preventDefault(), { capture: true });
+window.addEventListener('dblclick', e => e.preventDefault(), { capture: true });
 video.controls = false;
 video.disablePictureInPicture = true;
 
@@ -55,10 +83,43 @@ let currentSrc = null;   // 当前正在播的流地址
 let currentWebQid = null;
 let webSkipTimer = null;
 let ws = null;
+let lastState = null;
+let controlsTimer = null;
+let remoteLayer = 'closed'; // closed | channels | vod
+let remoteFocus = 0;
+let cutoffSentQid = null;
+let healthQid = null;
+let lastProgressPosition = 0;
+let lastProgressAt = Date.now();
+let issueSentQid = null;
+let issueSentAt = 0;
+
+function resetPlaybackHealth(qid = null, position = 0) {
+  healthQid = qid;
+  lastProgressPosition = Number(position) || 0;
+  lastProgressAt = Date.now();
+  if (issueSentQid !== qid) { issueSentQid = null; issueSentAt = 0; }
+}
+
+function reportPlaybackIssue(kind, detail, expectedQid = null) {
+  const cur = lastState?.current;
+  if (!cur || !ws || ws.readyState !== 1) return;
+  if (expectedQid && expectedQid !== cur.qid) return;
+  if (!currentSrc && kind !== 'source_error') return;
+  const now = Date.now();
+  if (issueSentQid === cur.qid && now - issueSentAt < 30000) return;
+  issueSentQid = cur.qid;
+  issueSentAt = now;
+  ws.send(JSON.stringify({
+    type: 'playbackIssue', qid: cur.qid, kind, detail: String(detail || '').slice(0, 500),
+    position: video.currentTime || 0, duration: video.duration || 0,
+    readyState: video.readyState, networkState: video.networkState
+  }));
+}
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws?role=tv`);
+  ws = new WebSocket(`${proto}://${location.host}/ws-tv`);
 
   ws.onmessage = e => {
     let msg;
@@ -73,6 +134,7 @@ function stopPlayback() {
   video.removeAttribute('src');
   video.load();
   currentSrc = null;
+  resetPlaybackHealth();
 }
 
 function showWebnote(cur, sub) {
@@ -86,6 +148,7 @@ function playStream(src, s) {
   if (src !== currentSrc) {
     currentSrc = src;
     video.src = src;
+    resetPlaybackHealth(s.current?.qid, s.position);
   }
   video.volume = s.volume;
 
@@ -94,20 +157,31 @@ function playStream(src, s) {
     video.currentTime = s.position;
   }
 
-  if (s.status === 'playing' && video.paused) video.play().catch(() => {});
+  if (s.status === 'playing' && video.paused) {
+    const expectedQid = s.current?.qid;
+    video.play().catch(error => reportPlaybackIssue('play_rejected', error?.message || 'video.play() 被拒绝', expectedQid));
+  }
   if (s.status !== 'playing' && !video.paused) video.pause();
 }
 
 function applyState(s) {
+  lastState = s;
+  renderChannelControls(s);
   const cur = s.current;
   if (!cur) {
     stopPlayback();
     currentWebQid = null;
     clearTimeout(webSkipTimer);
     webnote.classList.remove('show');
+    $('standby').querySelector('.main').textContent = s.waiting?.reason === 'on-demand' ? '请选择节目' : '频道空闲';
+    const when = s.waiting?.nextStartAt ? new Date(s.waiting.nextStartAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+    $('standby').querySelector('.sub').textContent = s.waiting?.nextTitle
+      ? `${when} 播放：${s.waiting.nextTitle}` : (s.waiting?.reason === 'on-demand' ? '按右键打开节目菜单' : '等待下一档节目');
     standby.classList.add('show');
     return;
   }
+  if (healthQid !== cur.qid) resetPlaybackHealth(cur.qid, s.position);
+  cutoffSentQid = cutoffSentQid === cur.qid ? cutoffSentQid : null;
   standby.classList.remove('show');
 
   // 网页片源：优先播放服务器缓存；未就绪则等待，失败则 6 秒后跳过
@@ -126,7 +200,7 @@ function applyState(s) {
       if (cur.cacheError) {
         showWebnote(cur, '缓存失败：' + cur.cacheError + '，即将跳过…');
         if (ws && ws.readyState === 1) {
-          webSkipTimer = setTimeout(() => ws.send(JSON.stringify({ type: 'ended' })), 6000);
+          webSkipTimer = setTimeout(() => reportPlaybackIssue('source_error', cur.cacheError, cur.qid), 6000);
         }
       }
     }
@@ -144,7 +218,7 @@ function applyState(s) {
       clearTimeout(webSkipTimer);
       showWebnote(cur, (cur.cacheError || '合集为空') + '，即将跳过…');
       if (ws && ws.readyState === 1) {
-        webSkipTimer = setTimeout(() => ws.send(JSON.stringify({ type: 'ended' })), 6000);
+        webSkipTimer = setTimeout(() => reportPlaybackIssue('source_error', cur.cacheError || '合集为空', cur.qid), 6000);
       }
     }
     return;
@@ -157,17 +231,167 @@ function applyState(s) {
 
 // 播完上报，服务端自动连播
 video.addEventListener('ended', () => {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ended' }));
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ended', qid: lastState?.current?.qid }));
 });
 
-// 每 5 秒回报真实进度
+video.addEventListener('error', () => {
+  const names = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
+  const code = video.error?.code || 0;
+  reportPlaybackIssue('media_error', names[code] || `HTMLMediaElement error ${code || 'unknown'}`, healthQid);
+});
+
+video.addEventListener('playing', () => { lastProgressAt = Date.now(); });
+
+// 节目播放上限：用于裁掉视频片尾垫料；服务端也有心跳兜底。
+video.addEventListener('timeupdate', () => {
+  const cur = lastState?.current;
+  if (video.currentTime > lastProgressPosition + 0.5) {
+    lastProgressPosition = video.currentTime;
+    lastProgressAt = Date.now();
+  }
+  if (cur?.maxPlaySeconds && video.currentTime >= cur.maxPlaySeconds && cutoffSentQid !== cur.qid) {
+    cutoffSentQid = cur.qid;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ended', qid: cur.qid, reason: 'cutoff' }));
+  }
+});
+
+// 每 5 秒回报真实进度；要求播放却连续 20 秒无进展时先记录并跳过。
 setInterval(() => {
-  if (ws && ws.readyState === 1 && !video.paused && currentSrc) {
-    ws.send(JSON.stringify({ type: 'position', position: video.currentTime, duration: video.duration || 0 }));
+  if (ws && ws.readyState === 1 && currentSrc) {
+    const cur = lastState?.current;
+    ws.send(JSON.stringify({
+      type: 'position', qid: cur?.qid, position: video.currentTime, duration: video.duration || 0,
+      paused: video.paused, readyState: video.readyState, networkState: video.networkState
+    }));
+    if (lastState?.status === 'playing' && cur && Date.now() - lastProgressAt >= 20000) {
+      reportPlaybackIssue(video.paused ? 'unexpected_pause' : 'frozen',
+        video.paused ? '服务端要求播放，但视频处于暂停状态' : '播放位置连续 20 秒未前进');
+    }
   }
 }, 5000);
 
 connect();
+
+function renderChannelControls(s) {
+  const box = $('channelControls');
+  const channels = s.channels || [];
+  const selected = channels.find(c => c.id === s.selectedChannelId);
+  const previous = box.querySelector('button.focused');
+  const previousKey = previous?.dataset.channelId ? `channel:${previous.dataset.channelId}` : previous?.dataset.action || null;
+  box.innerHTML = '<h2>频道</h2><div class="hint">↑↓ 选择　← 确认　→ 关闭</div>';
+  channels.forEach(c => {
+    const b = document.createElement('button');
+    b.textContent = `${c.selected ? '正在播放　' : ''}${c.name}`;
+    b.className = c.selected ? 'on' : '';
+    b.dataset.channelId = c.id;
+    b.onclick = () => {
+      if (c.id !== lastState?.selectedChannelId) ws?.send(JSON.stringify({ type: 'selectChannel', channelId: c.id }));
+      closeRemoteMenus();
+    };
+    box.appendChild(b);
+  });
+  if (selected?.allowOnDemand) {
+    const b = document.createElement('button');
+    b.textContent = `浏览「${selected.name}」节目`;
+    b.dataset.action = 'vod';
+    b.onclick = () => openVod(selected);
+    box.appendChild(b);
+  }
+  if (remoteLayer === 'channels') {
+    const buttons = [...box.querySelectorAll('button')];
+    const selectedButton = previousKey === 'vod'
+      ? buttons.find(button => button.dataset.action === 'vod')
+      : previousKey?.startsWith('channel:')
+        ? buttons.find(button => button.dataset.channelId === previousKey.slice(8))
+        : buttons.find(button => button.dataset.channelId === (s.selectedChannelId || ''));
+    const index = buttons.indexOf(selectedButton);
+    setRemoteFocus(index >= 0 ? index : remoteFocus);
+  }
+}
+
+function openVod(channel) {
+  $('vodTitle').textContent = `「${channel.name}」节目点播`;
+  const items = $('vodItems'); items.innerHTML = '';
+  (channel.items || []).forEach(item => {
+    const b = document.createElement('button'); b.textContent = item.title;
+    b.onclick = () => { ws?.send(JSON.stringify({ type: 'onDemand', qid: item.qid })); closeRemoteMenus(); };
+    items.appendChild(b);
+  });
+  $('channelControls').classList.remove('show');
+  $('vodPanel').classList.add('show');
+  document.body.classList.add('interactive');
+  remoteLayer = 'vod'; remoteFocus = 0; setRemoteFocus(0);
+}
+
+function menuButtons() {
+  if (remoteLayer === 'vod') return [...$('vodPanel').querySelectorAll('button')];
+  if (remoteLayer === 'channels') return [...$('channelControls').querySelectorAll('button')];
+  return [];
+}
+
+function setRemoteFocus(index) {
+  const buttons = menuButtons();
+  document.querySelectorAll('.focused').forEach(el => el.classList.remove('focused'));
+  if (!buttons.length) { remoteFocus = 0; return; }
+  remoteFocus = ((Number(index) || 0) % buttons.length + buttons.length) % buttons.length;
+  buttons[remoteFocus].classList.add('focused');
+  buttons[remoteFocus].scrollIntoView({ block: 'nearest' });
+}
+
+function openChannelMenu() {
+  clearTimeout(controlsTimer);
+  remoteLayer = 'channels';
+  $('vodPanel').classList.remove('show');
+  $('channelControls').classList.add('show');
+  document.body.classList.add('interactive');
+  renderChannelControls(lastState || {});
+}
+
+function closeRemoteMenus() {
+  clearTimeout(controlsTimer);
+  remoteLayer = 'closed'; remoteFocus = 0;
+  $('channelControls').classList.remove('show');
+  $('vodPanel').classList.remove('show');
+  document.querySelectorAll('.focused').forEach(el => el.classList.remove('focused'));
+  document.body.classList.remove('interactive');
+}
+
+function remoteMenuKey() {
+  if (remoteLayer === 'closed') openChannelMenu();
+  else if (remoteLayer === 'vod') openChannelMenu();
+  else closeRemoteMenus();
+}
+
+$('vodClose').onclick = () => openChannelMenu();
+
+// 最小共同按键：上下移动、左确认、右菜单/返回。Enter/Escape 等仅作键盘兼容别名。
+window.addEventListener('keydown', event => {
+  const key = event.key;
+  const isUp = key === 'ArrowUp';
+  const isDown = key === 'ArrowDown';
+  const isConfirm = key === 'ArrowLeft' || key === 'Enter' || key === 'OK' || key === 'Select';
+  const isMenu = key === 'ArrowRight' || key === 'Escape' || key === 'ContextMenu' || key === 'BrowserBack' || key === 'Back';
+  if (!isUp && !isDown && !isConfirm && !isMenu) return; // 音量、电源等系统键不拦截
+  event.preventDefault(); event.stopPropagation();
+  if (isMenu) { remoteMenuKey(); return; }
+  if (remoteLayer === 'closed') {
+    if (isConfirm) return;
+    openChannelMenu();
+  }
+  if (isUp || isDown) setRemoteFocus(remoteFocus + (isDown ? 1 : -1));
+  else menuButtons()[remoteFocus]?.click();
+}, { capture: true });
+
+window.addEventListener('mousemove', () => {
+  const channels = lastState?.channels || [];
+  const selected = channels.find(c => c.id === lastState?.selectedChannelId);
+  if (channels.length <= 1 && selected && !selected.allowOnDemand) return;
+  if (remoteLayer === 'closed') openChannelMenu();
+  clearTimeout(controlsTimer);
+  controlsTimer = setTimeout(() => {
+    if (remoteLayer === 'channels') closeRemoteMenus();
+  }, 5000);
+});
 </script>
 </body>
 </html>

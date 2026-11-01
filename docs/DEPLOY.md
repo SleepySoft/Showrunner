@@ -2,6 +2,13 @@
 
 目标：一台刚装好的 Win11 电脑（接着电视），从零到"开机即用的家庭电视台"。
 
+| 视角 | 本文定位 |
+|---|---|
+| WHY | 让家庭电脑无需数据库和复杂运维即可可靠启动、恢复和迁移 |
+| WHAT | 便携用户包、开发者安装、手动安装、公网反代与维护流程 |
+| HOW | 根据路线 A/B/C 执行，并用检查清单验收 |
+| ADR | [原子 JSON 持久化](adr/0004-atomic-json-storage.md) · [公网仅开放遥控平面](adr/0005-public-control-plane-only.md) |
+
 ## 两种分发模式
 
 | | 开发者路线 | 用户路线（复制即用） |
@@ -40,7 +47,7 @@
    - `npm install` 安装依赖（express + ws）
    - 下载 `bin\yt-dlp.exe` / `bin\ffmpeg.exe`
    - 尝试放行防火墙 TCP 7100（需管理员；失败会打印手动步骤）
-3. 双击 `start.bat` 启动。首次启动打印遥控器密码（也写入 `config.json`）
+3. 双击 `start.bat` 启动。首次启动打印遥控器密码（`config.json` 只保存哈希，请立即记下）
 4. （可选）双击 `scripts\autostart-on.bat` 注册开机自启——登录后无窗口后台运行，日志在 `data\server.log`
 
 ## 路线 C：手动逐条（脚本不可用时）
@@ -70,7 +77,7 @@ yt-dlp / ffmpeg 已在 `bin\` 里；若丢失，重新运行 `install.bat` 会�
 
 ## 公网远程编排（可选）
 
-你有公网 IP + DDNS：用 Caddy 反代，只暴露 `/remote` 和 `/api`，屏蔽 `/tv` `/media` `/cache`（示例见 README「公网访问」）。手机在外也能编排节目单、预下载缓存。
+你有公网 IP + DDNS：路由器只映射 HTTPS 443 到 Caddy，不能直接映射应用的 7100。Caddy 采用白名单，仅放行 `/remote`、`/api`、`/ws-remote`，其余（尤其 `/tv`、`/media`、`/cache`、`/ws-tv`、`/ws`）一律拒绝。完整配置见 README「公网访问」。
 
 ## 维护
 
@@ -78,11 +85,15 @@ yt-dlp / ffmpeg 已在 `bin\` 里；若丢失，重新运行 `install.bat` 会�
 |---|---|
 | 网页片源突然全部下载失败 | 网站改版了，跑 `scripts\update-tools.bat` 升级 yt-dlp |
 | 要临时操作这台电脑 | 遥控器 →「进入维护模式」，10 分钟无操作自动回锁 |
+| 要长期释放这台电脑 | 遥控器 →「下线」；使用完再从手机点「重新上线」 |
+| 修改密码 / 开关自启 | 遥控器「正在播放」页直接操作；改密会让其他设备重新登录 |
 | 换电脑迁移 | 整个文件夹拷走即可（`data\` 里有节目单和进度，`cache\` 可不带） |
 | 取消自启 | `scripts\autostart-off.bat` |
 
 ## 卸载
 
+卸载或删除程序目录前，先在遥控器“频道”页下载一次“备份资产”。Windows 默认还会在 `%LOCALAPPDATA%\Showrunner\assets\` 保留独立镜像，但它不替代异机备份；确认不再需要频道、合集和时刻表后再删除该目录。
+
 1. `scripts\autostart-off.bat` 取消自启
 2. （可选）`netsh advfirewall firewall delete rule name=Showrunner` 删防火墙规则
-3. 删除整个项目文件夹——系统里没有留下任何东西（便携 Node 也在文件夹内）
+3. 删除整个项目文件夹；如需彻底清除用户资产，再单独删除 `%LOCALAPPDATA%\Showrunner\assets\`

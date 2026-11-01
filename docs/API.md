@@ -1,9 +1,16 @@
 # API 参考
 
+| 视角 | 本文定位 |
+|---|---|
+| WHY | 为遥控器、电视端和服务端提供明确的信任边界与稳定契约 |
+| WHAT | REST 控制面、两个分离的 WebSocket 端点和局域网媒体流 |
+| HOW | 以下按资源列出请求、响应、校验和状态码 |
+| ADR | [服务器权威状态](adr/0001-server-authoritative-playback.md) · [公网仅开放遥控平面](adr/0005-public-control-plane-only.md) |
+
 Base URL：`http://<电脑IP>:7100`
 
 除 `POST /api/login` 外，所有 `/api/*` 需要会话（Cookie `sr_session`，登录时下发）。
-`/tv`、`/media`、`/cache` 面向局域网播放端，不鉴权——**公网部署必须屏蔽这三个前缀**。
+`/tv`、`/media`、`/cache`、`/ws-tv` 和兼容旧版的 `/ws` 面向局域网播放端——**公网部署必须屏蔽**。公网仅白名单开放 `/remote`、`/api`、`/ws-remote`。
 
 ## 鉴权
 
@@ -24,6 +31,14 @@ Base URL：`http://<电脑IP>:7100`
 
 使当前会话失效并清除 Cookie。
 
+### `POST /api/password`
+
+```json
+{ "currentPassword": "旧密码", "newPassword": "至少 8 个字符的新密码" }
+```
+
+成功后密码以 scrypt 哈希写入配置，撤销全部旧会话，并为当前设备签发新会话。
+
 ## 状态
 
 ### `GET /api/state`
@@ -37,7 +52,10 @@ Base URL：`http://<电脑IP>:7100`
     "volume": 1,
     "current": { "qid": "...", "mediaId": "...", "title": "...", "relPath": "...", "index": 0 },
     "queueLength": 3,
-    "upcoming": [{ "qid": "...", "title": "..." }]   // 最多 3 部
+    "upcoming": [{ "qid": "...", "title": "..." }],  // 最多 3 部
+    "waiting": { "reason": "schedule", "nextStartAt": 1793529000000, "nextTitle": "下一档" },
+    "channels": [{ "id": "...", "name": "少儿频道", "selected": true, "allowOnDemand": false }],
+    "selectedChannelId": "..."
   },
   "queue": [{ "qid": "...", "type": "local|web|collection", "title": "...", "addedAt": 0 }],
   "playlists": [{ "id": "...", "name": "...", "count": 3, "active": true, "loop": false }],
@@ -48,13 +66,34 @@ Base URL：`http://<电脑IP>:7100`
 }
 ```
 
-注意：`state`（电视端可见）与 `queue` / `playlists`（仅遥控器可见）是两个信任级别。`queue` 即播出中节目单的条目。
+注意：`state`（电视端可见）与 `queue` / `playlists`（仅遥控器可见）是两个信任级别。电视只能看到启用频道；禁止点播的频道不会暴露完整节目目录。
 
 合集条目（`type: "collection"`）成为当前片时，`state.current` 会被伪装成已解析的那一集（local/web 类型），标题形如 `《地球脉动》第3集 深海世界`，并带 `collectionId`；合集为空或已删除时带 `cacheError`。
 
-## 节目单
+## 频道（兼容路径 `/api/playlists`）
 
-节目单可创建多个、单独编辑、随时复用；点「播出」的节目单成为直播队列。**播出中节目单的 items 与直播队列是同一份数据**——编辑它即实时作用于播出。
+频道可创建多个并同时启用，`activeId` 表示电视当前选中的频道。为兼容旧客户端，接口和持久化字段仍沿用 `playlists` 名称。
+
+频道摘要新增 `enabled`、`allowOnDemand`、`autoPlay`。电视只会收到启用频道；仅当 `allowOnDemand=true` 时才会收到该频道的节目目录。
+
+### `POST /api/playlists/:id/options`
+
+```json
+{ "enabled": true, "allowOnDemand": true, "autoPlay": true }
+```
+
+- `enabled`：频道是否出现在电视端。
+- `allowOnDemand`：电视端是否可以选择具体节目。
+- `autoPlay=false`：纯点播频道，空闲时显示待机/节目选择画面。
+
+### `POST /api/playlists/:id/items/:qid/timing`
+
+```json
+{ "startTime": "18:30", "maxPlaySeconds": 1200 }
+```
+
+- `startTime`：每日指定开播点；提前结束时待机到下一档，下一档到点强切。留空清除。
+- `maxPlaySeconds`：播放上限，到时强切，可用于裁掉片尾垫料。留空清除。
 
 ### `GET /api/playlists`
 
@@ -79,6 +118,8 @@ Base URL：`http://<电脑IP>:7100`
 删除节目单。删除播出中的节目单会清空直播队列并待机。
 
 ### `POST /api/playlists/:id/activate`
+
+切换当前频道。普通自动播出频道会立即开始播放，不需要再调用 `control: play`；纯点播频道仍进入点播待机，含指定开播点的频道仍按严格排时规则决定当前节目或待机。
 
 设为当前播出：队列装入该节目单条目，回到第一部待机（不自动开播）。
 
@@ -128,6 +169,17 @@ Base URL：`http://<电脑IP>:7100`
 ```json
 // 请求 { "name": "地球脉动", "mode": "sequential" }   // mode: sequential（顺序）| random（随机不重复）
 // 201 { "collection": { "id": "...", "name": "...", "mode": "...", "count": 0, "cursor": 0 } }
+```
+
+### `POST /api/collections/import`
+
+从网站播放列表、B 站合集内任意一集、B 站分 P 视频等链接创建合集。B 站视频会自动反查它所属的 UGC 合集，其余网站由 yt-dlp 展开；解析成功后才创建合集。单个视频链接会导入为一集。单次最多导入 500 集。
+
+```json
+// 请求；name 可省略，默认使用网站返回的合集标题
+{ "url": "https://www.bilibili.com/video/BV.../", "name": "可选名称", "mode": "sequential" }
+// 201
+{ "collection": { "id": "...", "name": "...", "count": 12, "cursor": 0 }, "imported": 12, "truncated": false }
 ```
 
 ### `GET /api/collections/:id`
@@ -186,18 +238,34 @@ JSON 全量导出：时刻表 + 节目单全文 + 合集全文。
 
 Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表格、各节目单内容（合集条目标注"下次播第 N 集"）、合集进度（标注 ← 下一集）。适合打印贴在电视旁。
 
+## 频道与合集资产
+
+### `GET /api/assets/export`
+
+下载无损的 `showrunner-assets` 文档。格式带 `schemaVersion`，完整保留频道选项、节目时间、合集游标与时刻表；不包含密码、绝对媒体目录、缓存和播放位置。该文件用于恢复、迁移和提交分享，和面向阅读的 `/api/export.md` 不同。
+
+### `POST /api/assets/import`
+
+```json
+{ "mode": "merge", "document": { "format": "showrunner-assets", "schemaVersion": 1 } }
+```
+
+`merge` 保留当前资产，遇到 ID 冲突时自动重映射频道、合集和时刻表引用；`replace` 完整替换当前频道、合集与时刻表。导入本地媒体时按 `sourceName + relPath` 重新绑定，响应中的 `binding.unresolved` 表示当前片库尚未找到的条目数。请求上限 10 MiB；未知格式、未知 schema 版本、重复 ID 和悬空引用返回 400。
+
 ## 片库与目录
 
 ### `GET /api/library` / `GET /api/library?rescan=1`
 
 ```json
 {
-  "items": [{ "id": "...", "title": "...", "relPath": "...", "ext": ".mp4", "size": 123456 }],
+  "items": [{ "id": "...", "title": "...", "relPath": "纪录片/第一集.mp4", "sourceId": "...", "sourceName": "影片", "ext": ".mp4", "size": 123456 }],
   "mediaDirs": ["D:\\影片"]
 }
 ```
 
 `rescan=1` 重新扫描磁盘。条目按路径本地化排序，不暴露绝对路径。
+
+`sourceId/sourceName` 标识片库根目录，前端据此构建「根目录 → 子目录 → 文件」树。批量勾选目录后，将所有后代文件 ID 通过已有的 `mediaIds` 数组加入频道或合集。
 
 ### `GET /api/dirs` / `POST /api/dirs` / `DELETE /api/dirs`
 
@@ -300,18 +368,25 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 ### `GET /api/mode`
 
 ```json
-{ "mode": "normal", "manageBrowser": true, "kioskRunning": true, "maintenanceUntil": null, "browserFound": true }
+{ "mode": "normal", "manageBrowser": true, "kioskRunning": true, "maintenanceBrowserRunning": false, "managedBrowserRunning": true, "maintenanceUntil": null, "browserFound": true }
 ```
 
 ### `POST /api/mode`
 
 ```json
-// 请求 { "mode": "maintenance" }   // 或 "normal"
+// 请求 { "mode": "maintenance" }   // 或 "normal" / "offline"
 ```
 
-- `maintenance`：杀掉 kiosk 锁定画面，系统默认浏览器开一次普通窗口；`maintenanceUntil` 到期（默认 10 分钟）自动回到 `normal` 并重拉 kiosk。
+- `maintenance`：等待 kiosk 进程树退出，再启动一个受控的非 kiosk 维护窗口；`maintenanceUntil` 到期（默认 10 分钟）或手动回锁时，先关闭维护窗口再拉起唯一 kiosk。
+- `offline`：杀掉 kiosk 且看门狗不再重拉；状态持久化，直到遥控器切回 `normal`，用于长期释放电脑。
 - 非法 mode 返回 400。`manageBrowser: false` 时模式仍记录但不操作浏览器进程。
 - 模式变更通过 WebSocket 推送 `{ "type": "mode", "data": { /* 同 GET /api/mode */ } }`。
+- 所有模式切换串行处理；Showrunner 管理的浏览器任意时刻最多一个。服务启动时会清理带专用 profile 标记的遗留实例，不影响用户自己的浏览器。
+
+## 开机启动
+
+- `GET /api/autostart` → `{ "supported": true, "enabled": false }`
+- `POST /api/autostart`，请求 `{ "enabled": true }`：在 Windows 创建或删除固定名称的当前用户登录任务；不执行用户提供的命令或路径。
 
 ## 播放控制
 
@@ -343,10 +418,13 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 
 ## WebSocket
 
-### `GET /ws?role=tv|remote[&token=...]`
+### `GET /ws-tv`
 
-- `role=remote`：需要 `token`（登录响应中的 token），无 token 以 `4401` 关闭。
-- `role=tv`：局域网播放端，无需 token。
+电视端局域网连接，无需 token；不得经公网反代开放。
+
+### `GET /ws-remote`
+
+遥控器状态连接，使用登录产生的 `HttpOnly` 会话 Cookie；无效会话以 `4401` 关闭，旧客户端仍可传 `?token=...`。可经严格白名单的 HTTPS/WSS 反代开放。`/ws?role=...` 只为旧客户端兼容，禁止公网开放。
 
 **服务端 → 客户端**
 
@@ -356,9 +434,12 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 
 连接建立即推送一次；此后任何状态变更实时推送。`position` 心跳**不**触发广播（防风暴）。
 
-**电视端 → 服务端**（仅 `role=tv` 被采信，遥控器发送会被忽略）
+**电视端 → 服务端**（仅 `/ws-tv` 连接被采信，遥控器发送会被忽略）
 
 ```json
 { "type": "ended" }                                  // 播完 → 服务端自动连播
 { "type": "position", "position": 12.5, "duration": 5400 }   // 每 5 秒心跳
+{ "type": "playbackIssue", "qid": "...", "kind": "frozen", "detail": "播放位置连续 20 秒未前进", "position": 12.5, "duration": 5400, "readyState": 2, "networkState": 2 }
 ```
+
+`playbackIssue` 仅在 `qid` 等于当前节目时生效。服务端将事件追加到 `data/playback-events.log`，随后按正常播完逻辑跳到下一节目；同一节目 10 秒内重复报告会被忽略。当前类型包括下载/登录等准备失败的 `source_error`，以及 `media_error`、`play_rejected`、`frozen`、`unexpected_pause` 和 `stalled`。

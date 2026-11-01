@@ -30,6 +30,7 @@ class QueueManager extends EventEmitter {
     this.resolver = null;
     // 循环播放标志（播出节目单/时刻表规则设定）
     this.loop = false;
+    this.waiting = null; // { reason, nextStartAt, nextTitle }，严格排时/纯点播的待机画面
     // 重启续播：当前条目若已解析过合集剧集，保持原解析（进度才不串集）
     this._lastCurrentQid = this.current()?.qid ?? null;
   }
@@ -40,6 +41,7 @@ class QueueManager extends EventEmitter {
     this.loop = !!opts.loop;
     this.currentIndex = items.length ? 0 : -1;
     this.playback = { ...EMPTY_PLAYBACK(), volume: this.playback.volume };
+    this.waiting = null;
     this._resolveCurrent(true); // 换节目单 = 新一轮播出，合集条目抽新集
     this._changed();
   }
@@ -129,11 +131,13 @@ class QueueManager extends EventEmitter {
     this.currentIndex = -1;
     this._lastCurrentQid = null;
     this.playback = { ...EMPTY_PLAYBACK(), volume: this.playback.volume };
+    this.waiting = null;
     this._changed();
   }
 
   /** 下一部。到队尾：loop 则回卷重播（合集条目抽新集），否则进入待机态。 */
   next() {
+    this.waiting = null;
     if (this.currentIndex < this.queue.length - 1) {
       this.currentIndex++;
       this.playback.position = 0;
@@ -158,6 +162,7 @@ class QueueManager extends EventEmitter {
   }
 
   prev() {
+    this.waiting = null;
     if (this.currentIndex > 0) {
       this.currentIndex--;
       this.playback.position = 0;
@@ -176,6 +181,7 @@ class QueueManager extends EventEmitter {
     this.currentIndex = idx;
     this.playback.position = 0;
     this.playback.status = 'playing';
+    this.waiting = null;
     this._resolveCurrent();
     this._changed();
     return true;
@@ -186,6 +192,7 @@ class QueueManager extends EventEmitter {
     if (!this.current()) return false;
     this._resolveCurrent();
     this.playback.status = 'playing';
+    this.waiting = null;
     this._changed();
     return true;
   }
@@ -195,6 +202,15 @@ class QueueManager extends EventEmitter {
     this.playback.status = 'paused';
     this._changed();
     return true;
+  }
+
+  /** 保留频道内容但进入空闲画面，等待定时节目或点播。 */
+  standby(waiting = null) {
+    this.currentIndex = -1;
+    this._lastCurrentQid = null;
+    this.playback = { ...EMPTY_PLAYBACK(), volume: this.playback.volume, status: 'idle' };
+    this.waiting = waiting;
+    this._changed();
   }
 
   seek(position) {
@@ -243,6 +259,7 @@ class QueueManager extends EventEmitter {
       duration: this.playback.duration,
       volume: this.playback.volume,
       updatedAt: this.playback.updatedAt,
+      waiting: this.waiting,
       current,
       queueLength: this.queue.length,
       upcoming: this.queue.slice(Math.max(this.currentIndex, 0) + (cur ? 1 : 0), Math.max(this.currentIndex, 0) + 4)

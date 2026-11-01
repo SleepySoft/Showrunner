@@ -90,6 +90,30 @@ yt-dlp / ffmpeg 已在 `bin\` 里；若丢失，重新运行 `install.bat` 会�
 | 换电脑迁移 | 整个文件夹拷走即可（`data\` 里有节目单和进度，`cache\` 可不带） |
 | 取消自启 | `scripts\autostart-off.bat` |
 
+## Windows 远程终端
+
+Windows 也可以像 Linux 一样使用 SSH。首次需要通过本机或远程桌面打开“管理员 PowerShell”，按 Microsoft 的 [OpenSSH Server 指南](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse?pivots=windows-11&tabs=powershell)执行：
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+
+# 安装通常会自动创建规则；没有时只向本地子网开放 22 端口
+if (-not (Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue)) {
+  New-NetFirewallRule -Name OpenSSH-Server-In-TCP -DisplayName 'OpenSSH Server (sshd)' `
+    -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -RemoteAddress LocalSubnet
+}
+```
+
+另一台机器随后可运行：
+
+```powershell
+ssh Windows用户名@电脑IP
+```
+
+建议后续配置 SSH 公钥，并在 `%ProgramData%\ssh\sshd_config` 用 `AllowUsers` 限定维护账号。远程桌面适合首次安装和图形问题；SSH 适合更新、看日志、重启服务；SMB 只用于受控文件传输，不应承担进程管理。
+
 ## 卸载
 
 卸载或删除程序目录前，先在遥控器“频道”页下载一次“备份资产”。Windows 默认还会在 `%LOCALAPPDATA%\Showrunner\assets\` 保留独立镜像，但它不替代异机备份；确认不再需要频道、合集和时刻表后再删除该目录。

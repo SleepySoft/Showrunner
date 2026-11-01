@@ -58,7 +58,7 @@ $include = @('src', 'public', 'scripts', 'bin', 'node_modules', 'runtime',
 foreach ($p in $include) {
     Copy-Item $p -Destination $stageDir -Recurse -Force
 }
-# 包内绝不含私有数据：密码由首启重新生成
+# 包内绝不含私有数据：长期密码由用户在首启电视配对流程中设置
 foreach ($junk in @('data', 'cache', 'config.json', '.smoke-tmp')) {
     Remove-Item (Join-Path $stageDir $junk) -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -108,4 +108,4 @@ if (-not $SkipVerify) {
 
 Write-Host ""
 Write-Host "[√] 打包完成: dist\$zipName" -ForegroundColor Green
-Write-Host '    发给用户 → 解压 → 双击 start.bat。首次启动密码打印在控制台。'
+Write-Host '    发给用户 → 解压 → 双击 start.bat。首次启动按电视画面配对并设置密码。'

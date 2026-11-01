@@ -195,6 +195,10 @@
 
 本地媒体若明确报格式不支持或解码失败，不立即套用跳过策略：电视端改发 `compatibilityRequest`，服务端按需用 FFmpeg 生成 H.264/AAC MP4 到 `cache/compatible/`，完成后自动重播当前节目。原文件不变，转换结果按源文件签名复用并受独立容量上限约束。遥控器“日志”页通过鉴权 API 查看最近结构化播放事件与转换状态；不暴露绝对媒体路径。见 [ADR-0011](adr/0011-local-media-compatibility-fallback.md)。
 
+### 9. 可选播放前端（已接受，待实现）
+
+播出核心将与电视画面实现解耦：旧部署默认继续使用 Chrome kiosk，可选 mpv 直接播放本地/NAS 原文件和 yt-dlp 已就绪缓存。频道、合集、调度、异常策略与遥控器仍只有一份服务器权威状态；播放前端只执行命令和回报客观事件。`playerFrontend` 与可执行文件路径属于本机配置，不进入频道/合集资产。详细契约、源解析、单实例托管、维护模式、OSD/遥控器和实施顺序见 [ADR-0014](adr/0014-selectable-playback-frontends.md)。
+
 ## ADR：关键取舍
 
 | 决策 | 主要理由 |
@@ -211,6 +215,7 @@
 | [本地媒体兼容转换](adr/0011-local-media-compatibility-fallback.md) | 在不改原文件的前提下支持浏览器不能直接解码的存量格式 |
 | [同级双目录与确认式迁移](adr/0012-confirmed-sibling-data-layout.md) | 更新可替换程序而不碰数据，同时禁止静默搬动用户资产 |
 | [本机电视确认的密码恢复](adr/0013-tv-confirmed-password-recovery.md) | 在无控制台的 kiosk 场景恢复控制权，同时阻止公网重置 |
+| [可选 Chrome 与 mpv 播放前端](adr/0014-selectable-playback-frontends.md) | 保留现有 Web 电视端，同时让存量片库可用原生播放器直接解码 |
 | [托管浏览器保持单实例](adr/0007-single-managed-browser-instance.md) | 避免维护窗口与 kiosk 并存造成双播 |
 
 Node.js + Express + ws 继续作为单进程运行时；测试使用 Node 内置 `node:test`。若这些约束发生变化，应新增 ADR，而不是只修改本页结论。

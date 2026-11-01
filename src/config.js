@@ -6,12 +6,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { defaultDataDir, inspectStorage } = require('./storage-layout');
 
 const DEFAULTS = {
   host: '0.0.0.0',
   port: 7100,
   mediaDirs: [],          // 本地媒体库目录列表
-  dataFile: null,         // 默认 <root>/data/showrunner.json
+  dataFile: null,         // 默认 <同级数据目录>/data/showrunner.json
   password: null,         // 遥控器登录密码
   passwordHash: null,     // 首次配对/修改密码后使用 scrypt 哈希持久化
   sessionTtlHours: 720,   // 会话有效期，默认 30 天
@@ -21,11 +22,8 @@ const DEFAULTS = {
   compatibilityCacheMaxGB: 10 // 本地不兼容媒体转换缓存上限（GB）
 };
 
-function defaultAssetVaultDir(rootDir, env) {
-  // 固定放在安装目录之外：即使误删/替换程序目录，频道与合集仍有独立镜像。
-  if (env.LOCALAPPDATA) return path.join(env.LOCALAPPDATA, 'Showrunner', 'assets');
-  if (env.XDG_DATA_HOME) return path.join(env.XDG_DATA_HOME, 'showrunner', 'assets');
-  return path.join(rootDir, 'data', 'asset-backups');
+function defaultAssetVaultDir(dataDir) {
+  return path.join(dataDir, 'asset-vault');
 }
 
 function parseArgs(argv) {
@@ -35,6 +33,7 @@ function parseArgs(argv) {
     if (a === '--port') args.port = Number(argv[++i]);
     else if (a === '--host') args.host = argv[++i];
     else if (a === '--data') args.dataFile = argv[++i];
+    else if (a === '--data-dir') args.dataDir = argv[++i];
     else if (a === '--media') (args.mediaDirs = args.mediaDirs || []).push(argv[++i]);
     else if (a === '--password') args.password = argv[++i];
   }
@@ -42,7 +41,12 @@ function parseArgs(argv) {
 }
 
 function loadConfig(rootDir, argv = process.argv, env = process.env) {
-  const cfgFile = path.join(rootDir, 'config.json');
+  const cli = parseArgs(argv);
+  const dataDir = path.resolve(cli.dataDir || env.SHOWRUNNER_DATA_DIR || defaultDataDir(rootDir));
+  const storageMigration = inspectStorage(rootDir, dataDir);
+  const cfgFile = storageMigration.required
+    ? path.join(rootDir, 'config.json')
+    : path.join(dataDir, 'config.json');
   let fileCfg = {};
   if (fs.existsSync(cfgFile)) {
     try {
@@ -53,7 +57,7 @@ function loadConfig(rootDir, argv = process.argv, env = process.env) {
     catch { /* 配置损坏时忽略，用默认值 */ }
   }
 
-  const cfg = Object.assign({}, DEFAULTS, fileCfg, parseArgs(argv));
+  const cfg = Object.assign({}, DEFAULTS, fileCfg, cli);
   if (env.SHOWRUNNER_PASSWORD) cfg.password = env.SHOWRUNNER_PASSWORD;
   if (env.PORT) cfg.port = Number(env.PORT);
 
@@ -69,10 +73,20 @@ function loadConfig(rootDir, argv = process.argv, env = process.env) {
     cfg.setupRequired = false;
   }
 
-  if (!cfg.dataFile) cfg.dataFile = path.join(rootDir, 'data', 'showrunner.json');
-  cfg.assetVaultDir = defaultAssetVaultDir(rootDir, env);
+  if (!cfg.dataFile) cfg.dataFile = path.join(dataDir, 'data', 'showrunner.json');
+  if (!cfg.cacheDir) cfg.cacheDir = path.join(dataDir, 'cache');
+  if (!cfg.compatibilityCacheDir) cfg.compatibilityCacheDir = path.join(cfg.cacheDir, 'compatible');
+  if (!cfg.playbackIssueLog) cfg.playbackIssueLog = path.join(dataDir, 'logs', 'playback-events.log');
+  if (!cfg.assetVaultDir) cfg.assetVaultDir = defaultAssetVaultDir(dataDir);
+  cfg.dataDir = dataDir;
   cfg.rootDir = rootDir;
   cfg.configFile = cfgFile;
+  if (storageMigration.required) {
+    cfg.storageMigration = {
+      ...storageMigration,
+      code: String(crypto.randomInt(0, 1000000)).padStart(6, '0')
+    };
+  }
   return cfg;
 }
 
@@ -83,6 +97,7 @@ function savePasswordHash(cfgFile, passwordHash) {
   data.passwordHash = passwordHash;
   data.passwordSetupVersion = 1;
   delete data.password;
+  fs.mkdirSync(path.dirname(cfgFile), { recursive: true });
   const tmp = cfgFile + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
   fs.renameSync(tmp, cfgFile);

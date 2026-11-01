@@ -12,6 +12,22 @@ Base URL：`http://<电脑IP>:7100`
 除首次配对接口和 `POST /api/login` 外，所有 `/api/*` 需要会话（Cookie `sr_session`，登录或配对成功时下发）。
 `/tv`、`/media`、`/cache`、`/compatible`、`/ws-tv` 和兼容旧版的 `/ws` 面向局域网播放端——**公网部署必须屏蔽**。公网仅白名单开放 `/remote`、`/api`、`/ws-remote`。
 
+## 存储迁移门禁
+
+### `GET /api/storage/status`
+
+正常运行返回 `{ "required": false }`。如果启动时发现程序目录内的旧版数据，服务只运行迁移门禁，该接口返回新旧目录的文件数、字节数和是否冲突；不返回绝对路径或确认码。
+
+### `POST /api/storage/confirm`
+
+仅迁移门禁存在。需提交本机电视画面上的六位确认码：
+
+```json
+{ "code": "123456", "action": "migrate" }
+```
+
+`action` 可为 `migrate`、`use-target`、`fresh` 或 `postpone`。`fresh` 还必须提交 `confirmFresh: true`。连续五次确认码错误后，当前进程不再接受尝试。门禁期间业务 API 、播放 WebSocket 和媒体流都不会启动。
+
 ## 鉴权
 
 ### `GET /api/setup/status` / `POST /api/setup`
@@ -457,7 +473,7 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 { "type": "playbackIssue", "qid": "...", "kind": "frozen", "detail": "播放位置连续 20 秒未前进", "position": 12.5, "duration": 5400, "readyState": 2, "networkState": 2 }
 ```
 
-`playbackIssue` 仅在 `qid` 等于当前节目时生效。服务端将事件追加到 `data/playback-events.log`，随后按正常播完逻辑跳到下一节目；同一节目 10 秒内重复报告会被忽略。当前类型包括下载/登录等准备失败的 `source_error`，以及 `media_error`、`play_rejected`、`frozen`、`unexpected_pause`、`stalled` 和兼容转换相关事件。
+`playbackIssue` 仅在 `qid` 等于当前节目时生效。服务端将事件追加到 `<data-dir>/logs/playback-events.log`，随后按正常播完逻辑跳到下一节目；同一节目 10 秒内重复报告会被忽略。当前类型包括下载/登录等准备失败的 `source_error`，以及 `media_error`、`play_rejected`、`frozen`、`unexpected_pause`、`stalled` 和兼容转换相关事件。
 
 本地媒体出现 `MEDIA_ERR_SRC_NOT_SUPPORTED` 或 `MEDIA_ERR_DECODE` 时，电视端改发：
 

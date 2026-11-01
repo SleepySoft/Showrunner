@@ -3,8 +3,10 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = Split-Path -Parent $PSScriptRoot
+$dataDir = Join-Path (Split-Path -Parent $root) "$(Split-Path -Leaf $root)-data"
 
-$cfgPath = Join-Path $root 'config.json'
+$cfgPath = Join-Path $dataDir 'config.json'
+if (-not (Test-Path $cfgPath)) { $cfgPath = Join-Path $root 'config.json' }
 $repo = $null; $port = 7100
 if (Test-Path $cfgPath) {
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
@@ -16,6 +18,6 @@ if (-not $repo) {
     exit 1
 }
 Write-Host "仓库: $repo  端口: $port  安装目录: $root"
-& (Join-Path $PSScriptRoot 'self-update.ps1') -InstallDir $root -Repo $repo -Port $port
-if ($LASTEXITCODE -ne 0) { Write-Host '升级失败，详见 data\update.log' -ForegroundColor Red; exit 1 }
+& (Join-Path $PSScriptRoot 'self-update.ps1') -InstallDir $root -DataDir $dataDir -Repo $repo -Port $port
+if ($LASTEXITCODE -ne 0) { Write-Host "升级失败，详见 $dataDir\logs\update.log" -ForegroundColor Red; exit 1 }
 Write-Host '升级完成，服务已重启。' -ForegroundColor Green

@@ -1,15 +1,21 @@
 ﻿# Showrunner 自更新器（由服务端派生，或经 update.bat 手动触发）
-# 流程：等旧进程退出 → 解压新包 → 覆盖安装目录（保留 data/ cache/ config.json）→ 重启
+# 流程：等旧进程退出 → 解压新包 → 只覆盖安装目录 → 重启
 # 注意：本脚本总是从「数据目录里的副本」执行，因此可以安全覆盖安装目录中的自己。
 param(
     [int]$WaitPid = 0,          # 服务端派生时传入：等这个 PID 退出
     [string]$InstallDir,        # 安装根目录
+    [string]$DataDir,           # 同级用户数据目录
     [string]$PackageZip,        # 已下载的 zip；不给则按 -Repo 自行下载
     [string]$Repo,              # GitHub "owner/repo"（手动模式下载用）
     [int]$Port = 7100           # 手动模式：按端口找到并停止正在运行的服务端
 )
 $ErrorActionPreference = 'Stop'
-$logFile = Join-Path $InstallDir 'data\update.log'
+if (-not $DataDir) {
+    $parent = Split-Path -Parent $InstallDir
+    $leaf = Split-Path -Leaf $InstallDir
+    $DataDir = Join-Path $parent "$leaf-data"
+}
+$logFile = Join-Path $DataDir 'logs\update.log'
 function Log($msg) {
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg"
     Add-Content -Path $logFile -Value $line -Encoding UTF8
@@ -41,9 +47,9 @@ try {
         ForEach-Object { Log "关闭受控浏览器 $($_.ProcessId)"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
     # 更新前再留一份不可变快照。正常运行还会维护可移植资产历史，这里保护整个实时状态。
-    $stateFile = Join-Path $InstallDir 'data\showrunner.json'
+    $stateFile = Join-Path $DataDir 'data\showrunner.json'
     if (Test-Path -LiteralPath $stateFile) {
-        $preUpdateDir = Join-Path $InstallDir 'data\pre-update-backups'
+        $preUpdateDir = Join-Path $DataDir 'backups\pre-update'
         New-Item -ItemType Directory -Force -Path $preUpdateDir | Out-Null
         $preUpdateFile = Join-Path $preUpdateDir ("showrunner-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
         Copy-Item -LiteralPath $stateFile -Destination $preUpdateFile
@@ -58,7 +64,7 @@ try {
         $asset = $release.assets | Where-Object { $_.name -match '^showrunner-portable-.*\.zip$' } | Select-Object -First 1
         if (-not $asset) { $asset = $release.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1 }
         if (-not $asset) { throw '最新 Release 里没有 zip 分发包' }
-        $PackageZip = Join-Path $InstallDir "data\$($asset.name)"
+        $PackageZip = Join-Path $DataDir $asset.name
         Log "下载 $($asset.name)（$([math]::Round($asset.size/1MB,1)) MB）…"
         Invoke-WebRequest $asset.browser_download_url -OutFile $PackageZip
     }

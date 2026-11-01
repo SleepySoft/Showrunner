@@ -39,6 +39,14 @@
 
 唯一需要管理员的是防火墙放行（手机访问不了时才需要）：右键 `scripts\install.bat` 以管理员身份运行一次即可，或按脚本提示手动加入站规则。
 
+### 程序与数据目录
+
+`D:\showrunner\` 默认把所有私有数据放到同级 `D:\showrunner-data\`，无需配置。代码目录可整体替换；数据目录保存 `config.json`、`data\`、`cache\`、`logs\` 和 `asset-vault\`。
+
+旧版升级后第一次启动会暂停播放，电视显示六位迁移确认码。手机遥控器可选择“迁移并保留旧数据”、“使用现有同级数据”、“创建全新数据”或“暂不迁移并退出”。未输入正确确认码前不会搬动或写入旧数据；迁移完成后旧目录也不会自动删除。
+
+需自定义时可传 `--data-dir D:\TVData` 或设置 `SHOWRUNNER_DATA_DIR`。
+
 ## 路线 B：开发者（GitHub 仓库）
 
 1. `git clone` 仓库（纯代码 + 脚本；`bin/*.exe`、`runtime/`、`node_modules/` 均不入库）
@@ -47,8 +55,8 @@
    - `npm install` 安装依赖（express + ws）
    - 下载 `bin\yt-dlp.exe` / `bin\ffmpeg.exe`
    - 尝试放行防火墙 TCP 7100（需管理员；失败会打印手动步骤）
-3. 双击 `start.bat` 启动。电视会显示一次性配对码和手机地址；用手机打开该地址并设置长期密码（`config.json` 只保存哈希）
-4. （可选）双击 `scripts\autostart-on.bat` 注册开机自启——登录后无窗口后台运行，日志在 `data\server.log`
+3. 双击 `start.bat` 启动。电视会显示一次性配对码和手机地址；用手机打开该地址并设置长期密码（哈希保存在同级 `showrunner-data\config.json`）
+4. （可选）双击 `scripts\autostart-on.bat` 注册开机自启——登录后无窗口后台运行
 
 ## 路线 C：手动逐条（脚本不可用时）
 
@@ -87,7 +95,7 @@ yt-dlp / ffmpeg 已在 `bin\` 里；若丢失，重新运行 `install.bat` 会�
 | 要临时操作这台电脑 | 遥控器 →「进入维护模式」，10 分钟无操作自动回锁 |
 | 要长期释放这台电脑 | 遥控器 →「下线」；使用完再从手机点「重新上线」 |
 | 修改密码 / 开关自启 | 遥控器「正在播放」页直接操作；改密会让其他设备重新登录 |
-| 换电脑迁移 | 整个文件夹拷走即可（`data\` 里有节目单和进度，`cache\` 可不带） |
+| 换电脑迁移 | 同时拷走 `showrunner\` 和同级 `showrunner-data\`；不需要网页缓存时可不带数据目录中的 `cache\` |
 | 取消自启 | `scripts\autostart-off.bat` |
 
 ## Windows 远程终端
@@ -116,8 +124,8 @@ ssh Windows用户名@电脑IP
 
 ## 卸载
 
-卸载或删除程序目录前，先在遥控器“频道”页下载一次“备份资产”。Windows 默认还会在 `%LOCALAPPDATA%\Showrunner\assets\` 保留独立镜像，但它不替代异机备份；确认不再需要频道、合集和时刻表后再删除该目录。
+卸载或删除程序目录前，先在遥控器“频道”页下载一次“备份资产”。用户数据位于程序同级的 `showrunner-data\`，删除程序目录不会自动删它；但它仍不替代异机备份。
 
 1. `scripts\autostart-off.bat` 取消自启
 2. （可选）`netsh advfirewall firewall delete rule name=Showrunner` 删防火墙规则
-3. 删除整个项目文件夹；如需彻底清除用户资产，再单独删除 `%LOCALAPPDATA%\Showrunner\assets\`
+3. 删除程序文件夹；如需彻底清除用户资产，再单独删除同级 `showrunner-data\`

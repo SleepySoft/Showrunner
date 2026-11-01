@@ -165,7 +165,7 @@
 
 #### 频道与合集资产
 
-频道、合集、节目时间和时刻表另有带版本的 `.showrunner.json` 无损格式。`AssetVault` 只在这些内容的指纹变化时写入 `data/asset-backups/` 与安装目录外的用户资产目录并保留 30 份历史；播放进度不会制造历史噪声。实时状态损坏时 `Store` 从 `.bak` 恢复并隔离坏文件，不能恢复则停止启动，绝不以空频道覆盖原文件。完整边界见 [ADR-0008](adr/0008-channel-collection-assets.md)。
+频道、合集、节目时间和时刻表另有带版本的 `.showrunner.json` 无损格式。`AssetVault` 只在这些内容的指纹变化时写入同级数据目录中的 `data/asset-backups/` 与 `asset-vault/`，并保留 30 份历史；播放进度不会制造历史噪声。实时状态损坏时 `Store` 从 `.bak` 恢复并隔离坏文件，不能恢复则停止启动，绝不以空频道覆盖原文件。完整边界见 [ADR-0008](adr/0008-channel-collection-assets.md)。
 
 ### 6. 浏览器托管（普通 / 维护 / 下线模式）
 
@@ -179,17 +179,19 @@
 
 ### 7. 持久化与恢复
 
-- 队列或节目单的每次变更即写 `data/showrunner.json`（临时文件 + rename 原子替换，防断电损坏）。
+- 程序目录与用户数据目录并列；`showrunner/` 默认使用 `showrunner-data/`。配置、状态、资产、日志和缓存都在后者中。
+- 队列或节目单的每次变更即写 `<data-dir>/data/showrunner.json`（临时文件 + rename 原子替换，防断电损坏）。
 - 数据文件同时保存 `settings.mediaDirs`（网页端增删的媒体目录）与 `settings.schedules`（时刻表规则）、`collections`（合集全文与集数游标）——重启不丢，与 `config.json` 预置目录合并去重。
-- 旧版单队列数据文件首次启动自动迁移为「默认节目单」并设为播出中。
+- 发现程序目录内的旧版数据时，先进入只提供确认页的迁移门禁；未输入电视确认码前不加载业务、不写盘、不播放。见 [ADR-0012](adr/0012-confirmed-sibling-data-layout.md)。
+- 旧版单队列的数据结构在人工确认文件位置迁移之后，再自动升级为「默认频道」。
 - 重启后节目单、播出位置、播放进度原样恢复。
-- 损坏的状态文件有兜底逻辑（有测试），宁可回到空队列也不崩溃。
+- 损坏的状态文件先尝试 `.bak` 与资产保险库；无法恢复时拒绝以空数据启动，避免覆盖现场。
 
 ### 8. 播放异常侦测
 
 电视端在实际媒体播放路径上监听媒体错误和 `play()` 拒绝，并用 5 秒位置心跳判断冻结：服务端要求播放、存在当前媒体且连续 20 秒无进度，才报告 `playbackIssue`。缓存尚未完成、频道待机、用户暂停以及电视断线不会触发该判断。
 
-服务端验证异常报告的 `qid` 必须等于当前节目，先向 `data/playback-events.log` 写入 JSONL，再调用与正常播完相同的频道推进逻辑。当前阶段不做刷新、重启或重复下载，边界与后续方向见 [ADR-0006](adr/0006-skip-and-log-playback-issues.md)。
+服务端验证异常报告的 `qid` 必须等于当前节目，先向 `<data-dir>/logs/playback-events.log` 写入 JSONL，再调用与正常播完相同的频道推进逻辑。当前阶段不做刷新、重启或重复下载，边界与后续方向见 [ADR-0006](adr/0006-skip-and-log-playback-issues.md)。
 
 本地媒体若明确报格式不支持或解码失败，不立即套用跳过策略：电视端改发 `compatibilityRequest`，服务端按需用 FFmpeg 生成 H.264/AAC MP4 到 `cache/compatible/`，完成后自动重播当前节目。原文件不变，转换结果按源文件签名复用并受独立容量上限约束。遥控器“日志”页通过鉴权 API 查看最近结构化播放事件与转换状态；不暴露绝对媒体路径。见 [ADR-0011](adr/0011-local-media-compatibility-fallback.md)。
 
@@ -207,6 +209,7 @@
 | [公网仅开放遥控平面](adr/0005-public-control-plane-only.md) | 不把未鉴权的电视与媒体平面暴露到互联网 |
 | [播放异常先记录并跳过](adr/0006-skip-and-log-playback-issues.md) | 在完整恢复体系落地前避免节目无限卡住 |
 | [本地媒体兼容转换](adr/0011-local-media-compatibility-fallback.md) | 在不改原文件的前提下支持浏览器不能直接解码的存量格式 |
+| [同级双目录与确认式迁移](adr/0012-confirmed-sibling-data-layout.md) | 更新可替换程序而不碰数据，同时禁止静默搬动用户资产 |
 | [托管浏览器保持单实例](adr/0007-single-managed-browser-instance.md) | 避免维护窗口与 kiosk 并存造成双播 |
 
 Node.js + Express + ws 继续作为单进程运行时；测试使用 Node 内置 `node:test`。若这些约束发生变化，应新增 ADR，而不是只修改本页结论。

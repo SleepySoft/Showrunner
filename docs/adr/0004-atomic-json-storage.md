@@ -11,6 +11,8 @@
 
 配置保存在 `config.json`，运行状态保存在 `data/showrunner.json`，缓存另有索引。状态写入采用临时文件加 rename，避免正常断电或进程中断留下半份 JSON。
 
+> 存储格式决策仍有效；文件位置已由 [ADR-0012](0012-confirmed-sibling-data-layout.md) 调整为程序同级数据目录。
+
 ## 备选方案
 
 - SQLite：事务和查询更强，但当前没有并发写入和复杂查询需求。

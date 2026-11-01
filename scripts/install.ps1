@@ -71,10 +71,10 @@ Write-Host "    ffmpeg: $((& $ffmpeg -version | Select-Object -First 1))"
 
 # ---------- 4. 首次配置 ----------
 Step 4 '初始化配置'
-$dataDir = Join-Path $root 'data'
+$dataDir = Join-Path (Split-Path -Parent $root) "$(Split-Path -Leaf $root)-data"
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 # 密码由电视端首次配对设置，这里只确保数据目录存在
-Write-Host '    data\ 目录就绪（首次启动时在电视画面完成密码配对）'
+Write-Host "    同级数据目录就绪：$dataDir（首次启动时在电视画面完成密码配对）"
 
 # ---------- 5. 防火墙放行（可选，需管理员）----------
 Step 5 '防火墙放行局域网访问（TCP 7100）'

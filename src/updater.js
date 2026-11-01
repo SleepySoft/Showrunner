@@ -146,6 +146,7 @@ class Updater {
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', runCopy,
       '-WaitPid', String(process.pid),
       '-InstallDir', this.rootDir,
+      '-DataDir', this.dataDir,
       '-PackageZip', zipPath
     ];
     const child = this._spawn('powershell', args, { detached: true, stdio: 'ignore', windowsHide: true });

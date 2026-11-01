@@ -84,6 +84,9 @@ function apiRouter({ auth, setup, library, queue, playlists, collections, schedu
     res.json({ ok: true });
   });
 
+  // 正常服务已通过存储迁移门禁；该公开状态供遥控器首屏判断。
+  router.get('/storage/status', (_req, res) => res.json({ required: false }));
+
   // ---- 以下需要登录 ----
   router.use(auth.middleware());
 

@@ -76,10 +76,13 @@ Write-Host "    产物: dist\$zipName ($sizeMB MB)"
 if (-not $SkipVerify) {
     Step 4 '验证：模拟全新机器（解压到临时目录，只用包内文件启动）'
     $verifyDir = Join-Path $env:TEMP "showrunner-verify-$PID"
+    $verifyDataDir = "$verifyDir-data"
     Remove-Item $verifyDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $verifyDataDir -Recurse -Force -ErrorAction SilentlyContinue
     Expand-Archive $zipPath -DestinationPath $verifyDir
     # 禁 kiosk 托管，避免验证时弹浏览器（无 BOM 写入，防止 JSON 解析兼容问题）
-    [System.IO.File]::WriteAllText((Join-Path $verifyDir 'config.json'),
+    New-Item -ItemType Directory -Force -Path $verifyDataDir | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $verifyDataDir 'config.json'),
         '{"manageBrowser": false, "port": 7197, "host": "127.0.0.1"}')
 
     $vnode = Join-Path $verifyDir 'runtime\node\node.exe'
@@ -101,6 +104,7 @@ if (-not $SkipVerify) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         Start-Sleep 1
         Remove-Item $verifyDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $verifyDataDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 } else {
     Step 4 '（按参数跳过验证）'

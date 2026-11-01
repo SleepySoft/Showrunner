@@ -22,7 +22,7 @@ Showrunner 要解决的不是“如何限制一个普通播放器”，而是“
 | PC 服务端 | 权威状态机、片库、缓存、调度、鉴权和持久化 | `src/server.js` |
 | 电视播放端 | 接收当前播出状态、播放、上报进度和结束 | `/tv/` |
 | 网站源层 | 识别网站、解析标题/合集、修补站点元数据 | `src/sources/` |
-| 本地数据 | 配置、频道状态、缓存索引和媒体缓存 | `config.json`、`data/`、`cache/` |
+| 本地数据 | 配置、频道状态、缓存索引和媒体缓存 | 程序同级 `<程序目录名>-data/` |
 
 组件关系、数据模型和运行流程见 [架构设计](ARCHITECTURE.md#what系统由什么组成)。
 
@@ -49,3 +49,8 @@ ADR（Architecture Decision Record）记录已经作出的架构决定、当时�
 - [0005：公网仅开放遥控平面](adr/0005-public-control-plane-only.md)
 - [0006：播放异常第一阶段采用“记录并跳过”](adr/0006-skip-and-log-playback-issues.md)
 - [0007：Showrunner 托管浏览器保持单实例](adr/0007-single-managed-browser-instance.md)
+- [0008：频道与合集作为独立用户资产](adr/0008-channel-collection-assets.md)
+- [0009：电视端采用最小共同遥控器按键](adr/0009-minimal-tv-remote-input.md)
+- [0010：首次运行通过电视一次性配对](adr/0010-first-run-tv-pairing.md)
+- [0011：本地媒体失败后按需生成兼容缓存](adr/0011-local-media-compatibility-fallback.md)
+- [0012：同级双目录与人工确认迁移](adr/0012-confirmed-sibling-data-layout.md)

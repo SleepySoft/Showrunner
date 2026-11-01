@@ -27,6 +27,7 @@ const { Updater } = require('./updater');
 const { AutostartManager } = require('./autostart');
 const { PlaybackIssueLogger } = require('./playback-issues');
 const { CompatibilityManager } = require('./compatibility');
+const { startStorageGate } = require('./storage-gate');
 const { findYtdlp, findFfmpeg, hasFfmpeg, fetchCollection, checkYtdlp } = require('./ytdlp');
 
 function createApp(cfg) {
@@ -157,7 +158,7 @@ function createApp(cfg) {
     repo: cfg.updateRepo || '',
     currentVersion: require('../package.json').version,
     rootDir: cfg.rootDir,
-    dataDir: path.dirname(cfg.dataFile)
+    dataDir: cfg.dataDir || path.dirname(cfg.dataFile)
   });
   const autostart = cfg.autostartManager || new AutostartManager({ rootDir: cfg.rootDir });
   const playbackIssues = cfg.playbackIssueLogger || new PlaybackIssueLogger(
@@ -406,6 +407,7 @@ function createApp(cfg) {
 }
 
 async function start(cfg) {
+  if (cfg.storageMigration?.required) return startStorageGate(cfg);
   const { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, compatibility, updater, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState } = createApp(cfg);
   const server = http.createServer(app);
   const ws = setupWs(server, {
@@ -476,10 +478,11 @@ if (require.main === module) {
   start(cfg).then(({ port, host }) => {
     const shownHost = host === '0.0.0.0' || host === '::' ? '本机IP' : host;
     console.log('');
-    console.log('  Showrunner 放映员已启动');
+    console.log(cfg.storageMigration?.required ? '  Showrunner 等待确认数据迁移' : '  Showrunner 放映员已启动');
     console.log(`  电视播放端:  http://localhost:${port}/tv/`);
     console.log(`  手机遥控器:  http://${shownHost}:${port}/remote/`);
-    if (cfg.setupRequired) console.log('  首次运行：请在电视画面查看配对码，并用手机设置遥控器密码');
+    if (cfg.setupRequired && !cfg.storageMigration?.required) console.log('  首次运行：请在电视画面查看配对码，并用手机设置遥控器密码');
+    if (cfg.storageMigration?.required) console.log('  检测到旧版内置数据；未经电视确认码确认前不会迁移或播放');
     console.log('');
   });
 }

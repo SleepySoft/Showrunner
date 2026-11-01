@@ -236,8 +236,12 @@
     border: none; border-radius: 10px; background: var(--text); color: var(--bg); cursor: pointer;
   }
   #login .err { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
-  #setupPane { display: none; width: 100%; max-width: 340px; }
+  #setupPane, #storagePane { display: none; width: 100%; max-width: 380px; }
   #setupPane.show { display: block; }
+  #storagePane.show { display: block; }
+  #storagePane .storage-summary { color: var(--sub); font-size: 13px; line-height: 1.6; margin: 14px 0; }
+  #storagePane button { margin-bottom: 9px; }
+  #storagePane button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--line); }
   #setupCodeInput { letter-spacing: 8px; font-family: monospace; font-size: 24px !important; }
 </style>
 </head>
@@ -258,6 +262,16 @@
     <input id="setupPasswordConfirm" type="password" placeholder="再次输入新密码" autocomplete="new-password">
     <button id="setupBtn">完成首次设置</button>
     <div class="err" id="setupErr"></div>
+  </div>
+  <div id="storagePane">
+    <p>检测到旧版数据。播放器已暂停，只有输入电视画面上的确认码后才会执行迁移。</p>
+    <div class="storage-summary" id="storageSummary"></div>
+    <input id="storageCode" type="text" inputmode="numeric" maxlength="6" placeholder="电视确认码" autocomplete="one-time-code">
+    <button id="storageMigrate">迁移并保留旧数据（推荐）</button>
+    <button id="storageUseTarget" class="secondary" style="display:none">使用现有同级数据目录</button>
+    <button id="storageFresh" class="secondary">创建全新数据目录</button>
+    <button id="storagePostpone" class="secondary">暂不迁移并退出</button>
+    <div class="err" id="storageErr"></div>
   </div>
 </div>
 
@@ -517,6 +531,46 @@ function showLogin(firstSetup = false) {
   $('setupPane').classList.toggle('show', firstSetup);
 }
 function hideLogin() { $('login').classList.add('hidden'); }
+
+function showStorageMigration(info) {
+  $('login').classList.remove('hidden');
+  $('loginPane').style.display = 'none';
+  $('setupPane').classList.remove('show');
+  $('storagePane').classList.add('show');
+  $('storageUseTarget').style.display = info.conflict ? '' : 'none';
+  const oldText = `${info.legacy.directoryName}：${info.legacy.files} 个文件，${fmtSize(info.legacy.bytes)}`;
+  const targetText = info.conflict
+    ? `<br>${esc(info.target.directoryName)} 也已有 ${info.target.files} 个文件，必须明确选择使用哪一份。`
+    : '';
+  $('storageSummary').innerHTML = `待迁移 ${esc(oldText)}${targetText}<br>旧目录不会被删除。`;
+}
+
+async function submitStorageDecision(action) {
+  const code = $('storageCode').value.trim();
+  if (!/^\d{6}$/.test(code)) { $('storageErr').textContent = '请输入电视上的 6 位确认码'; return; }
+  let confirmFresh = false;
+  if (action === 'fresh') {
+    confirmFresh = confirm('确定忽略旧数据并创建全新数据目录？旧目录仍会保留，但不会自动导入。');
+    if (!confirmFresh) return;
+  }
+  const buttons = $('storagePane').querySelectorAll('button');
+  buttons.forEach(button => { button.disabled = true; });
+  $('storageErr').textContent = action === 'postpone' ? '正在退出…' : '正在校验和处理数据…';
+  try {
+    const result = await api('/storage/confirm', { method: 'POST', body: { code, action, confirmFresh } });
+    $('storageErr').textContent = result.restarting
+      ? '操作成功，程序正在重启；旧数据未删除。'
+      : '已取消本次迁移，程序即将退出。';
+    if (result.restarting) setTimeout(() => location.reload(), 4000);
+  } catch (error) {
+    $('storageErr').textContent = error.message;
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+$('storageMigrate').onclick = () => submitStorageDecision('migrate');
+$('storageUseTarget').onclick = () => submitStorageDecision('use-target');
+$('storageFresh').onclick = () => submitStorageDecision('fresh');
+$('storagePostpone').onclick = () => submitStorageDecision('postpone');
 
 $('loginBtn').onclick = async () => {
   try {
@@ -1447,6 +1501,8 @@ async function boot() {
 }
 (async () => {
   try {
+    const storage = await api('/storage/status');
+    if (storage.required) return showStorageMigration(storage);
     const setup = await api('/setup/status');
     if (setup.required) return showLogin(true);
     await api('/state'); hideLogin(); boot(); // 已有会话

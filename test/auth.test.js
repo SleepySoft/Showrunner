@@ -33,12 +33,14 @@ test('首次启动生成临时配对码，配对前不写永久密码', () => {
     const first = loadConfig(root, ['node', 'test'], {});
     assert.equal(first.setupRequired, true);
     assert.match(first.setupCode, /^\d{6}$/);
+    assert.equal(first.configFile, path.join(path.dirname(root), `${path.basename(root)}-data`, 'config.json'));
     assert.equal(fs.existsSync(path.join(root, 'config.json')), false);
 
     const hash = Auth.hashPassword('chosen-password');
     savePasswordHash(path.join(root, 'config.json'), hash);
     const second = loadConfig(root, ['node', 'test'], {});
     assert.equal(second.setupRequired, false);
+    assert.equal(second.storageMigration.required, true);
     assert.equal(second.setupCode, undefined);
     assert.equal(new Auth(null, 1, second.passwordHash).verifyPassword('chosen-password'), true);
 

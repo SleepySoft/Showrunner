@@ -14,7 +14,7 @@
 采用三层保护：
 
 1. `data/showrunner.json` 是实时状态，写入前保留 `showrunner.json.bak`；解析失败时从备份恢复并隔离损坏文件，无备份则拒绝以空状态启动。
-2. `data/asset-backups/` 保存资产当前镜像和 30 份滚动历史；Windows 同时镜像到固定的 `%LOCALAPPDATA%/Showrunner/assets/`，不随安装目录删除。
+2. `data/asset-backups/` 保存资产当前镜像和 30 份滚动历史。原定的 `%LOCALAPPDATA%` 第二镜像位置已由 [ADR-0012](0012-confirmed-sibling-data-layout.md) 取代：现放在程序同级数据目录的 `asset-vault/`。
 3. `.showrunner.json` 是可移植资产格式，带 `format` 和 `schemaVersion`，无损包含频道、节目字段、合集/游标与时刻表，但不包含密码、绝对媒体目录、缓存、播放位置和合集临时解析结果。
 
 管理页支持下载、合并导入和完整替换。完整替换前仍会通过持久化链路留下历史版本。本地媒体以 `sourceName + relPath` 优先重新绑定，跨机器找不到时保留引用并报告数量。

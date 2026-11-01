@@ -13,7 +13,7 @@
 npm test
 ```
 
-测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 168 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 173 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
 
 `test/dev.test.js` 断言开发入口只绑定 loopback，数据与资产落在 `.dev/`，不托管浏览器、不操作开机启动、默认关闭真实缓存，并验证环境变量覆盖与调试密码持久化。
 
@@ -106,7 +106,11 @@ CRUD 与重命名、activate/wasActive 语义、非播出节目单条目编辑�
 
 ### 单元 + WebSocket：播放异常（`test/playback-issues.test.js`）
 
-覆盖 JSONL 日志字段、过期 `qid` 拒绝、电视端 WebSocket 异常上报、当前节目立即跳过和下一节目接续。浏览器内 20 秒冻结计时通过脚本语法检查与人工烟测验证；未来抽成可注入时钟后再补纯单元测试。
+覆盖 JSONL 日志字段与新到旧查询、需鉴权的诊断 API、过期 `qid` 拒绝、电视端 WebSocket 异常上报、当前节目立即跳过和下一节目接续，以及格式不支持时启动兼容转换而不误跳台。浏览器内 20 秒冻结计时通过脚本语法检查与人工烟测验证；未来抽成可注入时钟后再补纯单元测试。
+
+### 单元：本地媒体兼容缓存（`test/compatibility.test.js`）
+
+覆盖按需转换成 MP4、状态装饰与流地址、源文件改变后产物失效，以及 FFmpeg 缺失、NAS 源文件不可访问时的可诊断失败。生产参数另用内置 FFmpeg 生成 AVI 并实际转为 H.264/AAC MP4 的烟测验证。
 
 ## 已知未覆盖（刻意留白）
 

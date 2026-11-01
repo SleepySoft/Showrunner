@@ -93,6 +93,8 @@ npm start
 
 遥控器还可直接修改为指定密码（8–128 个字符）；保存后其他设备的旧会话立即失效。Windows 上可在同一页开启或关闭登录时自启动，无需手动运行脚本。
 
+遥控器“日志”页可查看最近播放失败和兼容转换状态。本地 AVI、TS、MKV、WMV 或特殊编码视频若被浏览器拒绝，服务端会按需使用内置 FFmpeg 转为 H.264/AAC MP4，缓存在 `cache/compatible/` 并自动重试；原文件不会修改。首次转换需要等待并消耗 CPU/磁盘，默认兼容缓存上限为 10GB。
+
 ~~电视端全屏 kiosk 手动启动~~（已由服务端自动托管，见上文"维护模式"）。
 
 ## 命令行参数
@@ -112,7 +114,7 @@ npm start
 
 你有公网 IP + DDNS 时，可用 Caddy 反向代理让手机在外编排。路由器只把公网 **443** 转发到 Caddy，绝不能把 7100 直接映射到公网。使用强密码，并让 Caddy 自动签发 HTTPS 证书。
 
-**安全红线**：公网只允许 `/remote`、`/api` 和已鉴权的 `/ws-remote`。`/tv`、`/media`、`/cache`、`/ws-tv` 以及兼容旧版的 `/ws` 都是局域网接口，必须屏蔽。采用白名单比逐项黑名单更不容易漏掉新接口：
+**安全红线**：公网只允许 `/remote`、`/api` 和已鉴权的 `/ws-remote`。`/tv`、`/media`、`/cache`、`/compatible`、`/ws-tv` 以及兼容旧版的 `/ws` 都是局域网接口，必须屏蔽。采用白名单比逐项黑名单更不容易漏掉新接口：
 
 ```caddyfile
 tv.example.com {
@@ -158,7 +160,7 @@ showrunner/
 │   ├── yt-dlp.exe     # 内置 yt-dlp（网页片源下载，不入库，install 自动下载）
 │   └── ffmpeg.exe     # 内置 ffmpeg（音视频合并，不入库，install 自动下载）
 ├── scripts/           # 部署脚本：install / package / autostart / update-tools
-├── test/              # 168 个测试：单元 + 端到端
+├── test/              # 173 个测试：单元 + 端到端
 └── docs/              # 架构 / API / 调试 / 测试 / 部署文档
 ```
 

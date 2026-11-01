@@ -20,12 +20,13 @@ const { Scheduler } = require('./scheduler');
 const { BrowserController } = require('./browserctl');
 const { Auth } = require('./auth');
 const { apiRouter } = require('./routes/api');
-const { mediaRouter, cacheRouter } = require('./routes/media');
+const { mediaRouter, cacheRouter, compatibilityRouter } = require('./routes/media');
 const { setupWs } = require('./ws');
 const { CacheManager } = require('./cache');
 const { Updater } = require('./updater');
 const { AutostartManager } = require('./autostart');
 const { PlaybackIssueLogger } = require('./playback-issues');
+const { CompatibilityManager } = require('./compatibility');
 const { findYtdlp, findFfmpeg, hasFfmpeg, fetchCollection, checkYtdlp } = require('./ytdlp');
 
 function createApp(cfg) {
@@ -137,7 +138,15 @@ function createApp(cfg) {
     maxBytes: (cfg.cacheMaxGB || 20) * 1024 * 1024 * 1024
   });
   if (!ytdlp && !cfg.disableCache) console.warn('未找到 yt-dlp，网页片源将无法缓存（可安装 yt-dlp 或在 config.json 配置 ytdlpPath）');
-  queue.decorator = item => cache.decorate(item);
+  const compatibility = cfg.compatibilityManager || new CompatibilityManager({
+    dir: cfg.compatibilityCacheDir || path.join(cfg.cacheDir || path.join(cfg.rootDir, 'cache'), 'compatible'),
+    ffmpeg: cfg.disableCompatibility ? null : findFfmpeg(cfg.rootDir),
+    maxBytes: (cfg.compatibilityCacheMaxGB || 10) * 1024 * 1024 * 1024
+  });
+  queue.decorator = item => ({
+    ...cache.decorate(item),
+    ...compatibility.decorate(item, item?.mediaId ? library.get(item.mediaId) : null)
+  });
   const siteCollectionImporter = cfg.siteCollectionImporter || (async url => {
     if (!ytdlp) return { ok: false, error: '未找到 yt-dlp，无法解析网站合集' };
     return fetchCollection(ytdlp, url, { cookiesFromBrowser: cfg.cookiesFromBrowser || null });
@@ -288,6 +297,20 @@ function createApp(cfg) {
     return !!logged;
   }
 
+  function handleCompatibilityRequest(issue) {
+    const current = queue.current();
+    if (!current || !issue?.qid || issue.qid !== current.qid) return false;
+    const publicCurrent = queue.getPublicState().current || current;
+    const media = library.get(publicCurrent.mediaId);
+    if (!media) {
+      return handlePlaybackIssue({ ...issue, kind: 'compatibility_failed', detail: '片库中找不到源文件' });
+    }
+    playbackIssues.record({ ...issue, kind: 'compatibility_fallback' }, publicCurrent, queue.playback);
+    const entry = compatibility.ensure(media);
+    console.warn(`浏览器不支持，开始兼容转换：${publicCurrent.title || current.qid}`);
+    return !!entry;
+  }
+
   function selectChannel(id, { tv = false, play = true } = {}) {
     const channel = playlists.get(id);
     if (!channel || (tv && !channel.enabled)) return false;
@@ -370,24 +393,26 @@ function createApp(cfg) {
   app.use('/tv', express.static(path.join(cfg.rootDir, 'public', 'tv')));
   app.use('/media', mediaRouter(library));
   app.use('/cache', cacheRouter(cache));
+  app.use('/compatible', compatibilityRouter(compatibility));
 
   // 遥控器：静态页 + API
   app.use('/remote', express.static(path.join(cfg.rootDir, 'public', 'remote')));
   const onPasswordChange = hash => savePasswordHash(cfg.configFile || path.join(cfg.rootDir, 'config.json'), hash);
-  app.use('/api', apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
+  app.use('/api', apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
 
   app.get('/', (req, res) => res.redirect('/remote/'));
 
-  return { app, queue, library, playlists, collections, scheduler, browserctl, auth, setup, store, assetVault, cache, updater, autostart, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, playOnDemand, getTvState };
+  return { app, queue, library, playlists, collections, scheduler, browserctl, auth, setup, store, assetVault, cache, compatibility, updater, autostart, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState };
 }
 
 async function start(cfg) {
-  const { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, updater, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, playOnDemand, getTvState } = createApp(cfg);
+  const { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, compatibility, updater, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState } = createApp(cfg);
   const server = http.createServer(app);
   const ws = setupWs(server, {
     auth, queue, getState: getTvState,
     onTvEnded: handleChannelEnded,
     onTvIssue: handlePlaybackIssue,
+    onTvCompatibility: handleCompatibilityRequest,
     onTvSelectChannel: id => selectChannel(id, { tv: true, play: true }),
     onTvOnDemand: playOnDemand
   });
@@ -397,6 +422,15 @@ async function start(cfg) {
   // 缓存状态变化 / 下载进度 → 推送给电视与遥控器（进度已在 CacheManager 内节流）
   cache.on('change', () => ws.pushState());
   cache.on('progress', () => ws.pushState());
+  compatibility.on('change', entry => {
+    if (entry.status === 'failed') {
+      const current = queue.getPublicState().current;
+      if (current?.mediaId === entry.mediaId) {
+        playbackIssues.record({ kind: 'compatibility_failed', detail: entry.error, qid: current.qid }, current, queue.playback);
+      }
+    }
+    ws.pushState();
+  });
 
   // kiosk 托管启动 + 模式变更广播
   browserctl.on('change', s => ws.broadcast({ type: 'mode', data: s }));
@@ -420,7 +454,7 @@ async function start(cfg) {
   await browserctl.start();
 
   return {
-    server, app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, ws, updater, playbackIssues,
+    server, app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, compatibility, ws, updater, playbackIssues,
     applySchedulerTick, applyChannelTimingTick, selectChannel, playOnDemand, getTvState,
     port: addr.port, host: addr.address,
     close: async () => {

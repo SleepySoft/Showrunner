@@ -77,7 +77,7 @@ yt-dlp / ffmpeg 已在 `bin\` 里；若丢失，重新运行 `install.bat` 会�
 
 ## 公网远程编排（可选）
 
-你有公网 IP + DDNS：路由器只映射 HTTPS 443 到 Caddy，不能直接映射应用的 7100。Caddy 采用白名单，仅放行 `/remote`、`/api`、`/ws-remote`，其余（尤其 `/tv`、`/media`、`/cache`、`/ws-tv`、`/ws`）一律拒绝。完整配置见 README「公网访问」。
+你有公网 IP + DDNS：路由器只映射 HTTPS 443 到 Caddy，不能直接映射应用的 7100。Caddy 采用白名单，仅放行 `/remote`、`/api`、`/ws-remote`，其余（尤其 `/tv`、`/media`、`/cache`、`/compatible`、`/ws-tv`、`/ws`）一律拒绝。完整配置见 README「公网访问」。
 
 ## 维护
 

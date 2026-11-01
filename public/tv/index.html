@@ -132,12 +132,14 @@ let lastProgressPosition = 0;
 let lastProgressAt = Date.now();
 let issueSentQid = null;
 let issueSentAt = 0;
+let compatibilityRequestedQid = null;
 
 function resetPlaybackHealth(qid = null, position = 0) {
   healthQid = qid;
   lastProgressPosition = Number(position) || 0;
   lastProgressAt = Date.now();
   if (issueSentQid !== qid) { issueSentQid = null; issueSentAt = 0; }
+  if (compatibilityRequestedQid !== qid) compatibilityRequestedQid = null;
 }
 
 function reportPlaybackIssue(kind, detail, expectedQid = null) {
@@ -262,6 +264,34 @@ function applyState(s) {
     }
     return;
   }
+
+  // 浏览器不支持原格式时，服务端在后台生成 H.264/AAC MP4；完成后自动改播兼容缓存。
+  if (cur.compatibilityStatus) {
+    if (cur.compatibilityStatus === 'ready' && cur.stream) {
+      currentWebQid = null;
+      clearTimeout(webSkipTimer);
+      webnote.classList.remove('show');
+      playStream(cur.stream, s);
+      return;
+    }
+    if (cur.compatibilityStatus === 'failed') {
+      showWebnote(cur, `兼容转换失败：${cur.compatibilityError || '未知错误'}，即将跳过…`);
+      if (cur.qid !== currentWebQid) {
+        currentWebQid = cur.qid;
+        clearTimeout(webSkipTimer);
+        webSkipTimer = setTimeout(() => {
+          if (ws && ws.readyState === 1 && lastState?.current?.qid === cur.qid) {
+            ws.send(JSON.stringify({ type: 'ended', qid: cur.qid, reason: 'compatibility_failed' }));
+          }
+        }, 6000);
+      }
+      return;
+    }
+    currentWebQid = cur.qid;
+    clearTimeout(webSkipTimer);
+    showWebnote(cur, '原格式无法直接播放，正在转换为兼容格式…');
+    return;
+  }
   currentWebQid = null;
   clearTimeout(webSkipTimer);
   webnote.classList.remove('show');
@@ -276,6 +306,12 @@ video.addEventListener('ended', () => {
 video.addEventListener('error', () => {
   const names = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
   const code = video.error?.code || 0;
+  const cur = lastState?.current;
+  if (cur?.type === 'local' && !cur.compatibilityStatus && (code === 3 || code === 4) && compatibilityRequestedQid !== cur.qid) {
+    compatibilityRequestedQid = cur.qid;
+    ws?.send(JSON.stringify({ type: 'compatibilityRequest', qid: cur.qid, kind: 'media_error', detail: names[code] }));
+    return;
+  }
   reportPlaybackIssue('media_error', names[code] || `HTMLMediaElement error ${code || 'unknown'}`, healthQid);
 });
 

@@ -3,7 +3,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const ALLOWED_KINDS = new Set(['source_error', 'media_error', 'play_rejected', 'frozen', 'unexpected_pause', 'stalled']);
+const ALLOWED_KINDS = new Set([
+  'source_error', 'media_error', 'play_rejected', 'frozen', 'unexpected_pause', 'stalled',
+  'compatibility_fallback', 'compatibility_failed'
+]);
 
 class PlaybackIssueLogger {
   constructor(file) {
@@ -31,6 +34,14 @@ class PlaybackIssueLogger {
       console.error('播放异常日志写入失败:', error.message);
       return null;
     }
+  }
+
+  recent(limit = 100) {
+    const n = Math.max(1, Math.min(500, Number(limit) || 100));
+    try {
+      const lines = fs.readFileSync(this.file, 'utf8').split(/\r?\n/).filter(Boolean).slice(-n).reverse();
+      return lines.flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    } catch { return []; }
   }
 }
 

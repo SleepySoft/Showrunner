@@ -191,6 +191,8 @@
 
 服务端验证异常报告的 `qid` 必须等于当前节目，先向 `data/playback-events.log` 写入 JSONL，再调用与正常播完相同的频道推进逻辑。当前阶段不做刷新、重启或重复下载，边界与后续方向见 [ADR-0006](adr/0006-skip-and-log-playback-issues.md)。
 
+本地媒体若明确报格式不支持或解码失败，不立即套用跳过策略：电视端改发 `compatibilityRequest`，服务端按需用 FFmpeg 生成 H.264/AAC MP4 到 `cache/compatible/`，完成后自动重播当前节目。原文件不变，转换结果按源文件签名复用并受独立容量上限约束。遥控器“日志”页通过鉴权 API 查看最近结构化播放事件与转换状态；不暴露绝对媒体路径。见 [ADR-0011](adr/0011-local-media-compatibility-fallback.md)。
+
 ## ADR：关键取舍
 
 | 决策 | 主要理由 |
@@ -204,6 +206,7 @@
 | [电视首次配对](adr/0010-first-run-tv-pairing.md) | 让 Windows 静默启动也能安全设置用户自选密码 |
 | [公网仅开放遥控平面](adr/0005-public-control-plane-only.md) | 不把未鉴权的电视与媒体平面暴露到互联网 |
 | [播放异常先记录并跳过](adr/0006-skip-and-log-playback-issues.md) | 在完整恢复体系落地前避免节目无限卡住 |
+| [本地媒体兼容转换](adr/0011-local-media-compatibility-fallback.md) | 在不改原文件的前提下支持浏览器不能直接解码的存量格式 |
 | [托管浏览器保持单实例](adr/0007-single-managed-browser-instance.md) | 避免维护窗口与 kiosk 并存造成双播 |
 
 Node.js + Express + ws 继续作为单进程运行时；测试使用 Node 内置 `node:test`。若这些约束发生变化，应新增 ADR，而不是只修改本页结论。

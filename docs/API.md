@@ -10,7 +10,7 @@
 Base URL：`http://<电脑IP>:7100`
 
 除首次配对接口和 `POST /api/login` 外，所有 `/api/*` 需要会话（Cookie `sr_session`，登录或配对成功时下发）。
-`/tv`、`/media`、`/cache`、`/ws-tv` 和兼容旧版的 `/ws` 面向局域网播放端——**公网部署必须屏蔽**。公网仅白名单开放 `/remote`、`/api`、`/ws-remote`。
+`/tv`、`/media`、`/cache`、`/compatible`、`/ws-tv` 和兼容旧版的 `/ws` 面向局域网播放端——**公网部署必须屏蔽**。公网仅白名单开放 `/remote`、`/api`、`/ws-remote`。
 
 ## 鉴权
 
@@ -426,6 +426,11 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 - 支持 `Range: bytes=start-end`（拖动进度条必需），正确返回 `206` / `Content-Range` / `416`。
 - `id` 必须是媒体库已登记 ID，否则 404——不接受路径参数，无目录穿越风险。
 
+### `GET /compatible/:id/stream`
+
+- 本地媒体的 H.264/AAC MP4 兼容缓存流，同样支持 Range。
+- 仅转换完成后存在，否则返回 404；和 `/media` 一样只应在局域网开放。
+
 ## WebSocket
 
 ### `GET /ws-tv`
@@ -452,4 +457,16 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 { "type": "playbackIssue", "qid": "...", "kind": "frozen", "detail": "播放位置连续 20 秒未前进", "position": 12.5, "duration": 5400, "readyState": 2, "networkState": 2 }
 ```
 
-`playbackIssue` 仅在 `qid` 等于当前节目时生效。服务端将事件追加到 `data/playback-events.log`，随后按正常播完逻辑跳到下一节目；同一节目 10 秒内重复报告会被忽略。当前类型包括下载/登录等准备失败的 `source_error`，以及 `media_error`、`play_rejected`、`frozen`、`unexpected_pause` 和 `stalled`。
+`playbackIssue` 仅在 `qid` 等于当前节目时生效。服务端将事件追加到 `data/playback-events.log`，随后按正常播完逻辑跳到下一节目；同一节目 10 秒内重复报告会被忽略。当前类型包括下载/登录等准备失败的 `source_error`，以及 `media_error`、`play_rejected`、`frozen`、`unexpected_pause`、`stalled` 和兼容转换相关事件。
+
+本地媒体出现 `MEDIA_ERR_SRC_NOT_SUPPORTED` 或 `MEDIA_ERR_DECODE` 时，电视端改发：
+
+```json
+{ "type": "compatibilityRequest", "qid": "...", "detail": "MEDIA_ERR_SRC_NOT_SUPPORTED" }
+```
+
+服务端验证当前节目后启动 FFmpeg 兼容转换，不立即跳台。状态中的当前节目会出现 `compatibilityStatus: pending|transcoding|ready|failed`；就绪时 `stream` 指向 `/compatible/:mediaId/stream`。
+
+### `GET /api/diagnostics/playback?limit=200`
+
+返回最近的结构化播放事件（新到旧）及兼容转换缓存摘要。需要登录，最多返回 500 条，不包含绝对媒体路径和原始服务端日志。

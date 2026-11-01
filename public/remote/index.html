@@ -119,6 +119,9 @@
   }
   .badge.on { color: #16a34a; border-color: #16a34a; }
   .empty { text-align: center; color: var(--sub); font-size: 14px; padding: 48px 0; }
+  .log-event { border-left: 4px solid #d97706; }
+  .log-event.compat { border-left-color: #2563eb; }
+  .log-event .detail { margin-top: 6px; color: var(--sub); font-size: 12px; line-height: 1.45; word-break: break-word; }
 
   .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .toolbar button, .plbar button {
@@ -269,6 +272,7 @@
   <button data-tab="collections">合集</button>
   <button data-tab="schedule">时刻表</button>
   <button data-tab="library">片库</button>
+  <button data-tab="logs">日志</button>
 </nav>
 
 <main>
@@ -381,6 +385,16 @@
       <span id="libCount" style="align-self:center;font-size:13px;color:var(--sub)"></span>
     </div>
     <div id="libList"></div>
+  </section>
+
+  <!-- 播放诊断 -->
+  <section id="tab-logs" class="tab">
+    <div class="toolbar">
+      <button id="btnLogsRefresh" class="primary">刷新日志</button>
+    </div>
+    <div class="add-hint" style="margin:0 0 12px">记录格式不支持、解码失败、卡住、NAS 读取异常及兼容转换结果。时间按当前设备时区显示。</div>
+    <div id="compatJobs"></div>
+    <div id="playbackLogs"></div>
   </section>
 </main>
 
@@ -1325,6 +1339,11 @@ function renderNow() {
     if (cur.cacheError) $('nowStatus').textContent = `⚠️ 缓存失败：${cur.cacheError}`;
     else if (!cur.stream) $('nowStatus').textContent = `⏳ 正在缓存 ${Math.floor(cur.progress || 0)}%，缓存完成后自动开播`;
   }
+  if (cur?.compatibilityStatus) {
+    if (cur.compatibilityStatus === 'ready') $('nowStatus').textContent += ' · ✅ 正在使用兼容转换缓存';
+    else if (cur.compatibilityStatus === 'failed') $('nowStatus').textContent = `⚠️ 兼容转换失败：${cur.compatibilityError || '未知错误'}`;
+    else $('nowStatus').textContent = '⏳ 原格式无法直接播放，正在转换为 H.264/AAC MP4';
+  }
 
   if (state.upcoming && state.upcoming.length) {
     $('upnextCard').style.display = '';
@@ -1350,11 +1369,54 @@ $('seek').addEventListener('change', () => {
 
 // ---------- 标签页 ----------
 document.querySelectorAll('nav button').forEach(btn => {
-  btn.onclick = () => {
+  btn.onclick = async () => {
     document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + btn.dataset.tab));
+    if (btn.dataset.tab === 'logs') await renderDiagnostics();
   };
 });
+
+const LOG_KIND = {
+  media_error: '媒体格式/解码错误', source_error: '片源错误', play_rejected: '浏览器拒绝播放',
+  frozen: '播放卡住', unexpected_pause: '意外暂停', stalled: '读取停滞',
+  compatibility_fallback: '已启动兼容转换', compatibility_failed: '兼容转换失败'
+};
+async function renderDiagnostics() {
+  const logs = $('playbackLogs');
+  const jobs = $('compatJobs');
+  logs.innerHTML = '<div class="empty">正在读取…</div>';
+  try {
+    const result = await api('/diagnostics/playback?limit=200');
+    const conversions = result.compatibility || [];
+    jobs.innerHTML = conversions.length ? '<div style="font-size:13px;color:var(--sub);margin:4px 0 8px">兼容转换缓存</div>' : '';
+    for (const job of conversions) {
+      const div = document.createElement('div'); div.className = 'item';
+      const status = job.status === 'ready' ? `✅ 已就绪 · ${fmtSize(job.bytes)}`
+        : job.status === 'failed' ? `⚠️ 失败：${job.error || '未知错误'}`
+          : '⏳ 正在转换，首次播放需要等待';
+      div.innerHTML = `<div class="t"><div class="name">${esc(job.title || job.mediaId)}</div><div class="meta">${esc(status)}</div></div>`;
+      jobs.appendChild(div);
+    }
+    const events = result.events || [];
+    logs.innerHTML = events.length ? '<div style="font-size:13px;color:var(--sub);margin:14px 0 8px">最近播放事件</div>' : '<div class="empty">暂无播放异常记录</div>';
+    for (const event of events) {
+      const div = document.createElement('div');
+      div.className = 'item log-event' + (String(event.kind).startsWith('compatibility_') ? ' compat' : '');
+      const at = event.at ? new Date(event.at).toLocaleString('zh-CN', { hour12: false }) : '时间未知';
+      const mediaState = [event.position ? `位置 ${fmtTime(event.position)}` : '',
+        event.readyState === undefined ? '' : `ready=${event.readyState}`,
+        event.networkState === undefined ? '' : `network=${event.networkState}`].filter(Boolean).join(' · ');
+      div.innerHTML = `<div class="t"><div class="name">${esc(LOG_KIND[event.kind] || event.kind || '播放异常')} · ${esc(event.title || '未知节目')}</div>
+        <div class="meta">${esc(at)}${mediaState ? ' · ' + esc(mediaState) : ''}</div>
+        <div class="detail">${esc(event.detail || '无更多信息')}</div></div>`;
+      logs.appendChild(div);
+    }
+  } catch (error) {
+    jobs.innerHTML = '';
+    logs.innerHTML = `<div class="empty">日志读取失败<br>${esc(error.message)}</div>`;
+  }
+}
+$('btnLogsRefresh').onclick = renderDiagnostics;
 
 // ---------- 工具 ----------
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }

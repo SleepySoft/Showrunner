@@ -347,6 +347,8 @@ test('电视端与遥控器页面可访问', async () => {
   assert.match(tvHtml, /key === 'Enter'.*key === 'OK'/s);
   assert.match(tvHtml, /contextmenu[\s\S]*remoteMenuKey\(\)/);
   assert.match(tvHtml, /菜单外等同取消/);
+  assert.match(tvHtml, /compatibilityRequest/);
+  assert.match(tvHtml, /reason: 'compatibility_failed'/);
   assert.doesNotMatch(tvHtml, /addEventListener\('mousemove'/);
   assert.match(tvHtml, /音量、电源等系统键不拦截/);
   assert.equal((await fetch(base + '/remote/')).status, 200);

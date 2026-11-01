@@ -17,7 +17,8 @@ const DEFAULTS = {
   sessionTtlHours: 720,   // 会话有效期，默认 30 天
   ytdlpPath: null,        // yt-dlp 可执行文件路径（默认自动查找 PATH / bin/）
   cookiesFromBrowser: null, // 网页片源下载时借用哪个浏览器的登录态，如 "chrome"、"edge"
-  cacheMaxGB: 20          // 网页片源缓存上限（GB），超出后按最久未用淘汰
+  cacheMaxGB: 20,         // 网页片源缓存上限（GB），超出后按最久未用淘汰
+  compatibilityCacheMaxGB: 10 // 本地不兼容媒体转换缓存上限（GB）
 };
 
 function defaultAssetVaultDir(rootDir, env) {

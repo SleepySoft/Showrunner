@@ -9,7 +9,7 @@
 
 ## 决策
 
-应用继续监听局域网端口；公网部署必须经 HTTPS 反向代理，以白名单仅开放 `/remote`、`/api`、`/ws-remote`。`/tv`、`/media`、`/cache`、`/ws-tv` 和旧兼容 `/ws` 不得公开，路由器只映射反代的 443，不能映射 7100。
+应用继续监听局域网端口；公网部署必须经 HTTPS 反向代理，以白名单仅开放 `/remote`、`/api`、`/ws-remote`。`/tv`、`/media`、`/cache`、`/compatible`、`/ws-tv` 和旧兼容 `/ws` 不得公开，路由器只映射反代的 443，不能映射 7100。
 
 遥控 WebSocket 使用 `HttpOnly` 会话 Cookie，登录有限速；Cookie 使用 `SameSite=Strict`，HTTPS 下增加 `Secure`。
 

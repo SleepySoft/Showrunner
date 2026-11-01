@@ -75,4 +75,14 @@ function cacheRouter(cache) {
   return router;
 }
 
-module.exports = { mediaRouter, cacheRouter, streamFile };
+function compatibilityRouter(compatibility) {
+  const router = express.Router();
+  router.get('/:id/stream', (req, res) => {
+    const abs = compatibility.resolveFile(req.params.id);
+    if (!abs) return res.status(404).json({ error: 'compatible file not ready or not found' });
+    streamFile(req, res, abs);
+  });
+  return router;
+}
+
+module.exports = { mediaRouter, cacheRouter, compatibilityRouter, streamFile };

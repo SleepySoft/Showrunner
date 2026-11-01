@@ -9,7 +9,7 @@
 const { WebSocketServer } = require('ws');
 const { Auth } = require('./auth');
 
-function setupWs(server, { auth, queue, getState, onTvEnded, onTvIssue, onTvSelectChannel, onTvOnDemand, onBroadcast }) {
+function setupWs(server, { auth, queue, getState, onTvEnded, onTvIssue, onTvCompatibility, onTvSelectChannel, onTvOnDemand, onBroadcast }) {
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set();
 
@@ -70,6 +70,8 @@ function setupWs(server, { auth, queue, getState, onTvEnded, onTvIssue, onTvSele
         }
       } else if (msg.type === 'playbackIssue' && onTvIssue) {
         if (msg.qid && msg.qid === queue.current()?.qid) onTvIssue(msg);
+      } else if (msg.type === 'compatibilityRequest' && onTvCompatibility) {
+        if (msg.qid && msg.qid === queue.current()?.qid) onTvCompatibility(msg);
       } else if (msg.type === 'selectChannel' && onTvSelectChannel) {
         onTvSelectChannel(String(msg.channelId || ''));
       } else if (msg.type === 'onDemand' && onTvOnDemand) {

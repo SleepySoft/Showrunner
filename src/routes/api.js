@@ -17,7 +17,7 @@ const { createAssetDocument, validateAssetDocument } = require('../assets');
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
+function apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
   const router = express.Router();
   router.use(express.json({ limit: '10mb' }));
 
@@ -136,6 +136,15 @@ function apiRouter({ auth, setup, library, queue, playlists, collections, schedu
 
   router.get('/cache', (req, res) => {
     res.json({ items: cache ? cache.brief() : [] });
+  });
+
+  // ---- 诊断日志（只返回结构化播放事件，不暴露文件绝对路径或服务端原始日志） ----
+  router.get('/diagnostics/playback', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      events: playbackIssues ? playbackIssues.recent(req.query.limit) : [],
+      compatibility: compatibility ? compatibility.brief() : []
+    });
   });
 
   router.delete('/cache/:key', (req, res) => {

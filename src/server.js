@@ -28,6 +28,7 @@ const { AutostartManager } = require('./autostart');
 const { PlaybackIssueLogger } = require('./playback-issues');
 const { CompatibilityManager } = require('./compatibility');
 const { startStorageGate } = require('./storage-gate');
+const { PasswordRecovery } = require('./password-recovery');
 const { findYtdlp, findFfmpeg, hasFfmpeg, fetchCollection, checkYtdlp } = require('./ytdlp');
 
 function createApp(cfg) {
@@ -109,6 +110,9 @@ function createApp(cfg) {
   };
   if (!setup.required) setup.code = null;
   const auth = new Auth(cfg.password, cfg.sessionTtlHours, cfg.password ? null : cfg.passwordHash);
+  const passwordRecovery = cfg.passwordRecovery || new PasswordRecovery({
+    codeFactory: cfg.passwordRecoveryCode ? () => String(cfg.passwordRecoveryCode) : undefined
+  });
   let channelSlotKey = null;
   let onDemandActive = false;
   let schedulerHoldingStandby = false;
@@ -387,7 +391,12 @@ function createApp(cfg) {
   app.get('/tv/setup-info', (req, res) => {
     if (!isLoopback(req.socket.remoteAddress)) return res.status(404).end();
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ required: setup.required, code: setup.required ? setup.code : null, remoteUrls: remoteUrls(req.socket.localPort || cfg.port) });
+    res.json({
+      required: setup.required,
+      code: setup.required ? setup.code : null,
+      passwordRecovery: setup.required ? null : passwordRecovery.localInfo(),
+      remoteUrls: remoteUrls(req.socket.localPort || cfg.port)
+    });
   });
 
   // 播放端与媒体流：局域网专用，不鉴权
@@ -399,7 +408,7 @@ function createApp(cfg) {
   // 遥控器：静态页 + API
   app.use('/remote', express.static(path.join(cfg.rootDir, 'public', 'remote')));
   const onPasswordChange = hash => savePasswordHash(cfg.configFile || path.join(cfg.rootDir, 'config.json'), hash);
-  app.use('/api', apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
+  app.use('/api', apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
 
   app.get('/', (req, res) => res.redirect('/remote/'));
 

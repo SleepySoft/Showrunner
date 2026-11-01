@@ -54,3 +54,4 @@ ADR（Architecture Decision Record）记录已经作出的架构决定、当时�
 - [0010：首次运行通过电视一次性配对](adr/0010-first-run-tv-pairing.md)
 - [0011：本地媒体失败后按需生成兼容缓存](adr/0011-local-media-compatibility-fallback.md)
 - [0012：同级双目录与人工确认迁移](adr/0012-confirmed-sibling-data-layout.md)
+- [0013：本机电视确认的密码恢复](adr/0013-tv-confirmed-password-recovery.md)

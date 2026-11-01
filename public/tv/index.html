@@ -98,16 +98,21 @@ async function refreshFirstSetup() {
     if (!response.ok) return $('firstSetup').classList.remove('show');
     const info = await response.json();
     const migration = info.storageMigration;
-    $('firstSetup').classList.toggle('show', !!info.required || !!migration?.required);
-    if (!info.required && !migration?.required) return;
+    const recovery = info.passwordRecovery;
+    $('firstSetup').classList.toggle('show', !!info.required || !!migration?.required || !!recovery?.required);
+    if (!info.required && !migration?.required && !recovery?.required) return;
     if (migration?.required) {
       $('setupTitle').textContent = '需要确认数据迁移';
       $('setupLead').textContent = migration.conflict
         ? '旧程序目录和新数据目录都有内容。播放已暂停，请用手机明确选择使用哪一份。'
         : '检测到旧版内置数据。播放已暂停，请用手机确认后再迁移。';
       $('setupSafe').textContent = '未确认前不会复制、删除或写入旧数据；迁移后旧目录仍保留';
+    } else if (recovery?.required) {
+      $('setupTitle').textContent = '重置 Showrunner 密码';
+      $('setupLead').textContent = '请在手机遥控器上输入下面的一次性重置码，然后设置新密码';
+      $('setupSafe').textContent = '重置码 10 分钟内有效；完成后所有旧会话立即失效';
     }
-    $('setupCode').textContent = String(migration?.code || info.code || '').replace(/(.{3})/, '$1 ');
+    $('setupCode').textContent = String(migration?.code || recovery?.code || info.code || '').replace(/(.{3})/, '$1 ');
     const urls = info.remoteUrls?.length ? info.remoteUrls : [`http://本机IP:${location.port || 7100}/remote/`];
     $('setupUrls').replaceChildren(...urls.map(url => {
       const line = document.createElement('div'); line.textContent = url; return line;

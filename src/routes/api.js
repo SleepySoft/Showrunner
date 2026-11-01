@@ -14,10 +14,11 @@ const { COOKIE, Auth } = require('../auth');
 const { browse } = require('../browse');
 const { resolveTitle } = require('../webtitle');
 const { createAssetDocument, validateAssetDocument } = require('../assets');
+const { isDirectPrivateRequest } = require('../password-recovery');
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function apiRouter({ auth, setup, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
+function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
   const router = express.Router();
   router.use(express.json({ limit: '10mb' }));
 
@@ -82,6 +83,37 @@ function apiRouter({ auth, setup, library, queue, playlists, collections, schedu
     if (token) auth.logout(token);
     res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; Max-Age=0`);
     res.json({ ok: true });
+  });
+
+  router.get('/password/recovery/status', (_req, res) => {
+    res.json(passwordRecovery ? passwordRecovery.status() : { active: false, expiresAt: null });
+  });
+
+  router.post('/password/recovery/request', (req, res) => {
+    if (!isDirectPrivateRequest(req)) return res.status(403).json({ error: '密码恢复只能通过局域网直连发起' });
+    if (setup?.required) return res.status(409).json({ error: '请直接完成首次配对' });
+    if (!passwordRecovery) return res.status(503).json({ error: '密码恢复不可用' });
+    const result = passwordRecovery.request();
+    if (!result.ok) return res.status(429).json({ error: '尝试过多，请稍后再试', blockedUntil: result.blockedUntil });
+    res.json({ active: true, expiresAt: result.expiresAt });
+  });
+
+  router.post('/password/recovery/confirm', (req, res) => {
+    if (!isDirectPrivateRequest(req)) return res.status(403).json({ error: '密码恢复只能通过局域网直连完成' });
+    if (!passwordRecovery) return res.status(503).json({ error: '密码恢复不可用' });
+    const next = String(req.body?.newPassword ?? '');
+    if (next.length < 8 || next.length > 128) return res.status(400).json({ error: '新密码长度需为 8-128 个字符' });
+    const verified = passwordRecovery.verify(req.body?.code);
+    if (!verified.ok) return res.status(verified.blocked ? 429 : 403).json({ error: verified.error });
+    const hash = Auth.hashPassword(next);
+    try { if (onPasswordChange) onPasswordChange(hash); }
+    catch (e) { return res.status(500).json({ error: '密码保存失败：' + e.message }); }
+    auth.setPasswordHash(hash);
+    passwordRecovery.cancel();
+    loginFailures.clear();
+    const token = auth.createSession();
+    res.setHeader('Set-Cookie', cookieFor(req, token));
+    res.json({ ok: true, token });
   });
 
   // 正常服务已通过存储迁移门禁；该公开状态供遥控器首屏判断。

@@ -236,12 +236,14 @@
     border: none; border-radius: 10px; background: var(--text); color: var(--bg); cursor: pointer;
   }
   #login .err { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
-  #setupPane, #storagePane { display: none; width: 100%; max-width: 380px; }
+  #setupPane, #storagePane, #recoveryPane { display: none; width: 100%; max-width: 380px; }
   #setupPane.show { display: block; }
   #storagePane.show { display: block; }
+  #recoveryPane.show { display: block; }
   #storagePane .storage-summary { color: var(--sub); font-size: 13px; line-height: 1.6; margin: 14px 0; }
   #storagePane button { margin-bottom: 9px; }
   #storagePane button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+  #login button.secondary { margin-top: 9px; background: var(--card); color: var(--text); border: 1px solid var(--line); }
   #setupCodeInput { letter-spacing: 8px; font-family: monospace; font-size: 24px !important; }
 </style>
 </head>
@@ -253,6 +255,7 @@
     <p>家庭点播 · 家长遥控器</p>
     <input id="pwd" type="password" placeholder="遥控器密码" autocomplete="current-password">
     <button id="loginBtn">进入</button>
+    <button id="recoveryStart" class="secondary">忘记密码</button>
     <div class="err" id="loginErr"></div>
   </div>
   <div id="setupPane">
@@ -272,6 +275,15 @@
     <button id="storageFresh" class="secondary">创建全新数据目录</button>
     <button id="storagePostpone" class="secondary">暂不迁移并退出</button>
     <div class="err" id="storageErr"></div>
+  </div>
+  <div id="recoveryPane">
+    <p>密码重置码已显示在本机电视上，10 分钟内有效。</p>
+    <input id="recoveryCode" type="text" inputmode="numeric" maxlength="6" placeholder="电视重置码" autocomplete="one-time-code">
+    <input id="recoveryPassword" type="password" placeholder="新密码（至少 8 个字符）" autocomplete="new-password">
+    <input id="recoveryPasswordConfirm" type="password" placeholder="再次输入新密码" autocomplete="new-password">
+    <button id="recoveryConfirm">设置新密码</button>
+    <button id="recoveryBack" class="secondary">返回登录</button>
+    <div class="err" id="recoveryErr"></div>
   </div>
 </div>
 
@@ -529,6 +541,8 @@ function showLogin(firstSetup = false) {
   $('login').classList.remove('hidden');
   $('loginPane').style.display = firstSetup ? 'none' : '';
   $('setupPane').classList.toggle('show', firstSetup);
+  $('storagePane').classList.remove('show');
+  $('recoveryPane').classList.remove('show');
 }
 function hideLogin() { $('login').classList.add('hidden'); }
 
@@ -571,6 +585,38 @@ $('storageMigrate').onclick = () => submitStorageDecision('migrate');
 $('storageUseTarget').onclick = () => submitStorageDecision('use-target');
 $('storageFresh').onclick = () => submitStorageDecision('fresh');
 $('storagePostpone').onclick = () => submitStorageDecision('postpone');
+
+function showPasswordRecovery() {
+  $('login').classList.remove('hidden');
+  $('loginPane').style.display = 'none';
+  $('setupPane').classList.remove('show');
+  $('storagePane').classList.remove('show');
+  $('recoveryPane').classList.add('show');
+  $('recoveryErr').textContent = '';
+}
+$('recoveryStart').onclick = async () => {
+  $('loginErr').textContent = '正在请求电视确认码…';
+  try {
+    await api('/password/recovery/request', { method: 'POST' });
+    showPasswordRecovery();
+  } catch (error) { $('loginErr').textContent = error.message; }
+};
+$('recoveryBack').onclick = () => showLogin(false);
+$('recoveryConfirm').onclick = async () => {
+  const code = $('recoveryCode').value.trim();
+  const password = $('recoveryPassword').value;
+  if (!/^\d{6}$/.test(code)) { $('recoveryErr').textContent = '请输入电视上的 6 位重置码'; return; }
+  if (password.length < 8 || password.length > 128) { $('recoveryErr').textContent = '新密码长度需为 8-128 个字符'; return; }
+  if (password !== $('recoveryPasswordConfirm').value) { $('recoveryErr').textContent = '两次输入的密码不一致'; return; }
+  $('recoveryConfirm').disabled = true;
+  try {
+    const result = await api('/password/recovery/confirm', { method: 'POST', body: { code, newPassword: password } });
+    token = result.token; sessionStorage.setItem('sr_token', token);
+    $('recoveryPane').classList.remove('show');
+    hideLogin(); boot();
+  } catch (error) { $('recoveryErr').textContent = error.message; }
+  finally { $('recoveryConfirm').disabled = false; }
+};
 
 $('loginBtn').onclick = async () => {
   try {
@@ -1505,6 +1551,8 @@ async function boot() {
     if (storage.required) return showStorageMigration(storage);
     const setup = await api('/setup/status');
     if (setup.required) return showLogin(true);
+    const recovery = await api('/password/recovery/status');
+    if (recovery.active) return showPasswordRecovery();
     await api('/state'); hideLogin(); boot(); // 已有会话
   } catch { showLogin(false); }
 })();

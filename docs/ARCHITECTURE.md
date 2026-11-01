@@ -210,6 +210,7 @@
 | [播放异常先记录并跳过](adr/0006-skip-and-log-playback-issues.md) | 在完整恢复体系落地前避免节目无限卡住 |
 | [本地媒体兼容转换](adr/0011-local-media-compatibility-fallback.md) | 在不改原文件的前提下支持浏览器不能直接解码的存量格式 |
 | [同级双目录与确认式迁移](adr/0012-confirmed-sibling-data-layout.md) | 更新可替换程序而不碰数据，同时禁止静默搬动用户资产 |
+| [本机电视确认的密码恢复](adr/0013-tv-confirmed-password-recovery.md) | 在无控制台的 kiosk 场景恢复控制权，同时阻止公网重置 |
 | [托管浏览器保持单实例](adr/0007-single-managed-browser-instance.md) | 避免维护窗口与 kiosk 并存造成双播 |
 
 Node.js + Express + ws 继续作为单进程运行时；测试使用 Node 内置 `node:test`。若这些约束发生变化，应新增 ADR，而不是只修改本页结论。

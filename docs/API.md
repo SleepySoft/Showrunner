@@ -9,7 +9,7 @@
 
 Base URL：`http://<电脑IP>:7100`
 
-除首次配对接口和 `POST /api/login` 外，所有 `/api/*` 需要会话（Cookie `sr_session`，登录或配对成功时下发）。
+除首次配对、密码恢复和 `POST /api/login` 外，所有业务 `/api/*` 需要会话（Cookie `sr_session`，登录、配对或恢复成功时下发）。
 `/tv`、`/media`、`/cache`、`/compatible`、`/ws-tv` 和兼容旧版的 `/ws` 面向局域网播放端——**公网部署必须屏蔽**。公网仅白名单开放 `/remote`、`/api`、`/ws-remote`。
 
 ## 存储迁移门禁
@@ -39,6 +39,14 @@ Base URL：`http://<电脑IP>:7100`
 ```
 
 成功响应与登录相同并设置会话 Cookie。配对码错误返回 403，连续失败会返回 429；已经完成配对返回 409。配对码本身只能由本机 loopback 的 `/tv/setup-info` 读取，不通过 `/api/setup/status` 披露。
+
+### 忘记密码恢复
+
+- `GET /api/password/recovery/status`：只返回是否有有效请求和过期时间，不返回确认码。
+- `POST /api/password/recovery/request`：请求电视显示十分钟一次性码。
+- `POST /api/password/recovery/confirm`：提交 `{ "code": "123456", "newPassword": "..." }`，成功后保存新哈希、撤销所有旧会话并返回新会话。
+
+请求和确认都只接受局域网 IP 直连；存在 `Forwarded` / `X-Forwarded-For` 或 Host 为公网域名时返回 403。确认码只由 loopback `/tv/setup-info` 披露，连续五次错误后锁定十五分钟。
 
 ### `POST /api/login`
 

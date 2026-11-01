@@ -73,8 +73,8 @@ Write-Host "    ffmpeg: $((& $ffmpeg -version | Select-Object -First 1))"
 Step 4 '初始化配置'
 $dataDir = Join-Path $root 'data'
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-# 密码等配置首次启动时由服务端自动生成，这里只确保目录存在
-Write-Host '    data\ 目录就绪（密码将在首次启动时自动生成并打印）'
+# 密码由电视端首次配对设置，这里只确保数据目录存在
+Write-Host '    data\ 目录就绪（首次启动时在电视画面完成密码配对）'
 
 # ---------- 5. 防火墙放行（可选，需管理员）----------
 Step 5 '防火墙放行局域网访问（TCP 7100）'
@@ -106,7 +106,7 @@ Write-Host @"
 
   首次启动后：
     电视端    http://localhost:7100/tv/   （服务端会自动拉起 kiosk 全屏）
-    遥控器    http://本机IP:7100/remote/  （密码见控制台首次打印，或 config.json）
+    遥控器    http://本机IP:7100/remote/  （首次运行按电视画面提示设置密码）
 
   工具更新：yt-dlp 官网更新频繁，网站改版导致下载失败时运行 scripts\update-tools.bat
 "@ -ForegroundColor Green

@@ -1,5 +1,5 @@
 'use strict';
-/** Windows 登录时开机启动：使用固定任务名和固定脚本路径，不经过 shell。 */
+/** Windows 登录时开机启动：任务计划程序直接运行 Node，不依赖 VBS/WScript。 */
 const path = require('path');
 const { execFile } = require('child_process');
 
@@ -34,10 +34,11 @@ class AutostartManager {
     if (this.platform !== 'win32') return { supported: false, enabled: false, error: '仅支持 Windows' };
     try {
       if (enabled) {
-        const runner = path.join(this.rootDir, 'scripts', 'run-hidden.vbs');
+        const bundledNode = path.join(this.rootDir, 'runtime', 'node', 'node.exe');
+        const server = path.join(this.rootDir, 'src', 'server.js');
         await this._run([
           '/Create', '/TN', this.taskName, '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
-          '/TR', `wscript.exe "${runner}"`
+          '/TR', `"${bundledNode}" "${server}"`
         ]);
       } else {
         const current = await this.status();

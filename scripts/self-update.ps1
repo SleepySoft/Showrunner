@@ -80,20 +80,14 @@ try {
     Remove-Item $PackageZip -Force -ErrorAction SilentlyContinue
 
     # ---------- 4. 重启 ----------
-    $vbs = Join-Path $InstallDir 'scripts\run-hidden.vbs'
-    if (Test-Path $vbs) {
-        Log '后台静默重启…'
-        Start-Process wscript.exe -ArgumentList "`"$vbs`""
-    } else {
-        $node = Join-Path $InstallDir 'runtime\node\node.exe'
-        Log "未找到 run-hidden.vbs，直接拉起 $node"
-        Start-Process $node -ArgumentList 'src\server.js' -WorkingDirectory $InstallDir -WindowStyle Hidden
-    }
+    $node = Join-Path $InstallDir 'runtime\node\node.exe'
+    Log "后台静默重启 $node（不依赖 VBS/WScript）…"
+    Start-Process $node -ArgumentList 'src\server.js' -WorkingDirectory $InstallDir -WindowStyle Hidden
     Log '==== 更新完成 ===='
 } catch {
     Log "！！更新失败：$_"
     # 失败也要把旧实例拉回来，电视不能黑着
-    $vbs = Join-Path $InstallDir 'scripts\run-hidden.vbs'
-    if (Test-Path $vbs) { Start-Process wscript.exe -ArgumentList "`"$vbs`"" }
+    $node = Join-Path $InstallDir 'runtime\node\node.exe'
+    if (Test-Path $node) { Start-Process $node -ArgumentList 'src\server.js' -WorkingDirectory $InstallDir -WindowStyle Hidden }
     exit 1
 }

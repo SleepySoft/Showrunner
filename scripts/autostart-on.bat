@@ -1,11 +1,19 @@
 @echo off
 chcp 65001 >nul
-rem 注册开机自启：登录后后台静默运行 Showrunner（无窗口）
+rem 注册开机自启：任务计划程序直接运行便携 Node，不依赖 VBS/WScript
 set "ROOT=%~dp0.."
-schtasks /Create /TN "Showrunner" /SC ONLOGON /RL LIMITED /F /TR "wscript.exe \"%ROOT%\scripts\run-hidden.vbs\""
+set "NODE=%ROOT%\runtime\node\node.exe"
+if not exist "%NODE%" (
+  echo 未找到便携 Node：%NODE%
+  echo 请重新解压完整便携包，或从遥控器设置页启用开机启动。
+  pause
+  exit /b 1
+)
+schtasks /Create /TN "Showrunner" /SC ONLOGON /RL LIMITED /F /TR "\"%NODE%\" \"%ROOT%\src\server.js\""
 if %ERRORLEVEL%==0 (
   echo.
-  echo 已注册开机自启任务「Showrunner」。现在就可以双击 scripts\run-hidden.vbs 试跑一次。
+  echo 已注册开机自启任务「Showrunner」，下次登录 Windows 时自动后台运行。
+  echo 现在试跑请双击项目根目录的 start.bat。
   echo 取消方法：运行 autostart-off.bat
 ) else (
   echo.

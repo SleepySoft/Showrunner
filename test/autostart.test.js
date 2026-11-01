@@ -23,7 +23,10 @@ test('查询、启用和停用 Windows 开机启动', async () => {
   assert.equal((await a.setEnabled(true)).enabled, true);
   assert.equal(f.enabled, true);
   const create = f.calls.find(c => c.args[0] === '/Create');
-  assert.ok(create.args.some(x => x.includes('run-hidden.vbs')));
+  const command = create.args[create.args.indexOf('/TR') + 1];
+  assert.match(command, /runtime\\node\\node\.exe/);
+  assert.match(command, /src\\server\.js/);
+  assert.doesNotMatch(command, /wscript|\.vbs/i);
   assert.equal((await a.setEnabled(false)).enabled, false);
   assert.equal(f.enabled, false);
 });

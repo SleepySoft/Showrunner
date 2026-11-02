@@ -43,12 +43,13 @@ function cleanupManagedMpv() {
 }
 
 class MpvFrontend extends PlaybackFrontend {
-  constructor({ mpvPath, rootDir, ipcPath = defaultIpcPath(), inputConf, spawnImpl = spawn, connectImpl = p => net.createConnection(p), cleanupImpl = cleanupManagedMpv, available } = {}) {
+  constructor({ mpvPath, rootDir, ipcPath = defaultIpcPath(), inputConf, windowed = false, spawnImpl = spawn, connectImpl = p => net.createConnection(p), cleanupImpl = cleanupManagedMpv, available } = {}) {
     super('mpv');
     this.mpvPath = mpvPath || findMpv(null, rootDir);
     this.available = available === undefined ? !!this.mpvPath : !!available;
     this.ipcPath = ipcPath;
     this.inputConf = inputConf || path.join(__dirname, 'mpv-input.conf');
+    this.windowed = !!windowed;
     this.spawnImpl = spawnImpl;
     this.connectImpl = connectImpl;
     this.cleanupImpl = cleanupImpl;
@@ -74,9 +75,12 @@ class MpvFrontend extends PlaybackFrontend {
     this._stopping = false;
     await this.cleanupImpl();
     if (process.platform !== 'win32') { try { fs.unlinkSync(this.ipcPath); } catch {} }
+    // 开发/调试的窗口化模式用最大化普通窗口代替全屏置顶无边框，保证可自由操作
     const args = [
-      '--fullscreen', '--ontop', '--no-border', '--idle=yes', '--force-window=yes',
-      '--no-osc', '--cursor-autohide=always', '--hwdec=auto-safe', '--keep-open=no', '--title=Showrunner',
+      ...(this.windowed ? ['--window-maximized'] : ['--fullscreen', '--ontop', '--no-border']),
+      '--idle=yes', '--force-window=yes',
+      '--no-osc', ...(this.windowed ? [] : ['--cursor-autohide=always']),
+      '--hwdec=auto-safe', '--keep-open=no', '--title=Showrunner',
       `--input-ipc-server=${this.ipcPath}`, `--input-conf=${this.inputConf}`
     ];
     try {

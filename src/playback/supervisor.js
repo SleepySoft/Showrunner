@@ -7,13 +7,14 @@ const { EventEmitter } = require('events');
  * 模式切换及前端切换均串行执行。
  */
 class FrontendSupervisor extends EventEmitter {
-  constructor({ browser, frontends, selected = 'chrome', resolver, manage = true, initialMode = 'normal', onSelectionChange, relaunchCooldownMs = 5000 }) {
+  constructor({ browser, frontends, selected = 'chrome', resolver, manage = true, manageFrontend, initialMode = 'normal', onSelectionChange, relaunchCooldownMs = 5000 }) {
     super();
     this.browser = browser;
     this.frontends = frontends;
     this.selected = frontends[selected] ? selected : 'chrome';
     this.resolver = resolver;
-    this.manage = !!manage;
+    this.manageBrowser = typeof browser.manage === 'boolean' ? !!browser.manage : !!manage;
+    this.manage = manageFrontend === undefined ? !!manage : !!manageFrontend;
     this.mode = initialMode === 'offline' ? 'offline' : 'normal';
     this.onSelectionChange = onSelectionChange;
     this.relaunchCooldownMs = relaunchCooldownMs;
@@ -54,7 +55,7 @@ class FrontendSupervisor extends EventEmitter {
     const player = this.frontends[this.selected]?.status() || null;
     return {
       mode: this.mode,
-      manageBrowser: this.manage,
+      manageBrowser: this.manageBrowser,
       manageFrontend: this.manage,
       frontend: this.selected,
       playerRunning: !!player?.running,

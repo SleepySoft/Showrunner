@@ -29,6 +29,16 @@ test('开发配置隔离正式数据、浏览器、缓存和系统开机启动',
     assert.equal(configured.disableCache, false);
     assert.equal(configured.mediaDirs.length, 2);
 
+    // 默认不拉起任何播放前端；SHOWRUNNER_DEV_MPV=1 时仅窗口化拉起 mpv（非全屏、不碰 Chrome）
+    assert.equal(base.manageFrontend, false);
+    assert.equal(base.playerFrontend, 'chrome');
+    assert.equal(base.mpvWindowed, false);
+    const mpvDev = buildDevConfig(root, { SHOWRUNNER_DEV_MPV: '1' });
+    assert.equal(mpvDev.manageFrontend, true);
+    assert.equal(mpvDev.playerFrontend, 'mpv');
+    assert.equal(mpvDev.mpvWindowed, true);
+    assert.equal(mpvDev.manageBrowser, false);
+
     fs.mkdirSync(path.join(root, '.dev'), { recursive: true });
     const hash = Auth.hashPassword('changed-dev-password');
     fs.writeFileSync(path.join(root, '.dev', 'config.json'), JSON.stringify({ passwordHash: hash, passwordSetupVersion: 1 }));

@@ -19,6 +19,8 @@ function buildDevConfig(rootDir, env = process.env) {
   const savedHash = Number(saved.passwordSetupVersion || 0) >= 1 ? saved.passwordHash || null : null;
   const port = Number(env.SHOWRUNNER_DEV_PORT || 7101);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SHOWRUNNER_DEV_PORT 必须是 1-65535 的端口');
+  // 显式开启后才在开发模式拉起 mpv 前端；窗口化（最大化普通窗口，非全屏）保证可自由操作
+  const mpvDev = enabled(env.SHOWRUNNER_DEV_MPV);
 
   return {
     rootDir,
@@ -36,6 +38,9 @@ function buildDevConfig(rootDir, env = process.env) {
     playbackIssueLog: path.join(devDir, 'playback-events.log'),
     disableCache: !enabled(env.SHOWRUNNER_DEV_CACHE),
     manageBrowser: false,
+    manageFrontend: mpvDev,
+    playerFrontend: mpvDev ? 'mpv' : 'chrome',
+    mpvWindowed: mpvDev,
     updateRepo: '',
     autostartManager: {
       status: async () => ({ supported: false, enabled: false, debug: true }),
@@ -57,6 +62,9 @@ async function main() {
   console.log(`  ${passwordHint}`);
   console.log(`  数据目录: ${path.dirname(cfg.dataFile)}`);
   console.log(`  真实网页缓存: ${cfg.disableCache ? '关闭（SHOWRUNNER_DEV_CACHE=1 可开启）' : '开启'}`);
+  console.log(cfg.manageFrontend
+    ? '  mpv 前端: 窗口化调试模式（SHOWRUNNER_DEV_MPV=1，最大化窗口非全屏；不拉起 Chrome）'
+    : '  mpv 前端: 不拉起（SHOWRUNNER_DEV_MPV=1 可窗口化调试，非全屏）');
   console.log('');
 
   let closing = false;

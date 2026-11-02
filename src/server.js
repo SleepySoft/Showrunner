@@ -163,7 +163,7 @@ function createApp(cfg) {
   const chromeFrontend = new ChromeFrontend(browserProcess);
   const mpvFrontend = cfg.mpvFrontend || new MpvFrontend({
     mpvPath: findMpv(cfg.mpvPath, cfg.rootDir), rootDir: cfg.rootDir,
-    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf
+    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf, windowed: !!cfg.mpvWindowed
   });
   const frontendSupervisor = cfg.frontendSupervisor || new FrontendSupervisor({
     browser: browserProcess,
@@ -171,6 +171,7 @@ function createApp(cfg) {
     selected: selectedFrontend,
     resolver,
     manage: !!cfg.manageBrowser,
+    manageFrontend: cfg.manageFrontend === undefined ? !!cfg.manageBrowser : !!cfg.manageFrontend,
     initialMode,
     onSelectionChange: type => saveConfigPatch(cfg.configFile || path.join(cfg.rootDir, 'config.json'), { playerFrontend: type })
   });

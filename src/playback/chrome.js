@@ -9,7 +9,11 @@ class ChromeFrontend extends PlaybackFrontend {
     this.browser = browserController;
   }
 
-  async start() { return !!(await this.browser.setMode('normal')); }
+  async start() {
+    // 非托管模式（开发/调试）绝不拉起 kiosk；调试 Chrome 前端直接打开 /tv/ 页面即可
+    if (!this.browser.manage) return false;
+    return !!(await this.browser.setMode('normal'));
+  }
   async stop() { await this.browser.setMode('offline'); }
   async load() {}
   status() {
@@ -19,7 +23,7 @@ class ChromeFrontend extends PlaybackFrontend {
       available: s.browserFound,
       running: s.kioskRunning,
       ready: s.kioskRunning,
-      lastError: s.browserFound ? null : '未找到 Chrome/Edge'
+      lastError: !s.manageBrowser ? '非托管模式：不拉起 kiosk，请直接打开 /tv/ 页面调试' : (s.browserFound ? null : '未找到 Chrome/Edge')
     };
   }
 }

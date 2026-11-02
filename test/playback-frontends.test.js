@@ -75,6 +75,34 @@ test('MpvFrontend 使用受控参数和 IPC，拒绝任意路径', async () => {
   assert.equal(proc.killed, true);
 });
 
+test('MpvFrontend 窗口化模式不启用全屏/置顶/无边框，方便开发调试操作', async () => {
+  const proc = new FakeProcess();
+  const socket = new FakeSocket();
+  let launched;
+  const mpv = new MpvFrontend({
+    mpvPath: 'C:\\fake\\mpv.exe', available: true, ipcPath: '\\\\.\\pipe\\test-mpv', windowed: true,
+    spawnImpl: (exe, args) => { launched = { exe, args }; return proc; },
+    connectImpl: () => socket, cleanupImpl: async () => {}
+  });
+  assert.equal(await mpv.start(), true);
+  assert.ok(launched.args.includes('--window-maximized'));
+  assert.ok(!launched.args.includes('--fullscreen'));
+  assert.ok(!launched.args.includes('--ontop'));
+  assert.ok(!launched.args.includes('--no-border'));
+  assert.ok(!launched.args.includes('--cursor-autohide=always'));
+  await mpv.stop();
+});
+
+test('ChromeFrontend 在非托管模式下拒绝拉起 kiosk', async () => {
+  const { ChromeFrontend } = require('../src/playback/chrome');
+  const calls = [];
+  const browser = { manage: false, setMode: async mode => { calls.push(mode); return {}; }, status: () => ({ browserFound: true, kioskRunning: false, manageBrowser: false }) };
+  const chrome = new ChromeFrontend(browser);
+  assert.equal(await chrome.start(), false);
+  assert.deepEqual(calls, []);
+  assert.match(chrome.status().lastError, /非托管/);
+});
+
 class FakeFrontend extends EventEmitter {
   constructor(type, startResult = true) { super(); this.type = type; this.startResult = startResult; this.running = false; this.calls = []; this.currentQid = null; }
   async start() { this.calls.push('start'); this.running = this.startResult; return this.startResult; }
@@ -114,6 +142,36 @@ test('FrontendSupervisor 串行停旧启新，失败时恢复 Chrome 且不保�
   assert.equal(supervisor.status().frontend, 'chrome');
   assert.deepEqual(saved, []);
   assert.deepEqual(chrome.calls, ['start', 'stop', 'start']);
+});
+
+test('FrontendSupervisor 拆分管理：浏览器不托管时仍可单独托管 mpv 前端（开发模式）', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = false;
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  const resolver = { resolve: () => ({ status: 'ready', source: { kind: 'file', uri: path.resolve('episode.mkv'), trusted: true } }) };
+  const supervisor = new FrontendSupervisor({
+    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver,
+    manage: false, manageFrontend: true
+  });
+  const status = await supervisor.start();
+  assert.equal(status.manageBrowser, false);
+  assert.equal(status.manageFrontend, true);
+  assert.ok(mpv.calls.includes('start'));   // mpv 前端被拉起
+  assert.ok(!chrome.calls.includes('start')); // chrome/kiosk 不拉起
+  await supervisor.sync({ status: 'idle', position: 0, volume: 1, updatedAt: 1, current: null });
+  assert.ok(mpv.calls.some(call => Array.isArray(call) && call[0] === 'standby')); // 权威状态照常同步到 mpv
+});
+
+test('FrontendSupervisor 缺省行为不变：仅传 manage 时两者一致', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = true;
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  const supervisor = new FrontendSupervisor({ browser, frontends: { chrome, mpv }, selected: 'mpv', resolver: {}, manage: true });
+  const status = await supervisor.start();
+  assert.equal(status.manageBrowser, true);
+  assert.equal(status.manageFrontend, true);
 });
 
 test('FrontendSupervisor 将权威状态同步到 mpv，并在维护模式回收播放器', async () => {

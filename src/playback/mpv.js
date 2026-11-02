@@ -61,6 +61,7 @@ class MpvFrontend extends PlaybackFrontend {
     this.duration = 0;
     this.lastError = null;
     this._requestId = 0;
+    this._pendingSeek = 0; // 文件载入完成（拿到 duration）后再补的起始位置
     this._stopping = false;
     this._connectTimer = null;
   }
@@ -103,6 +104,7 @@ class MpvFrontend extends PlaybackFrontend {
     this._stopping = true;
     clearTimeout(this._connectTimer);
     this._connectTimer = null;
+    this._pendingSeek = 0;
     const socket = this.socket;
     this.socket = null;
     try { socket?.destroy(); } catch {}
@@ -122,7 +124,10 @@ class MpvFrontend extends PlaybackFrontend {
     }
     this.currentQid = qid || null;
     this.currentSource = source.uri;
-    this._command(['loadfile', source.uri, 'replace', `start=${Math.max(0, Number(position) || 0)}`]);
+    // 不带第 4 个 options 参数：mpv 0.41 的 loadfile 会拒绝 start= 形式（invalid parameter）。
+    // 起始位置改为载入完成（duration 到达）后补一次 seek，兼容所有构建。
+    this._pendingSeek = Math.max(0, Number(position) || 0);
+    this._command(['loadfile', source.uri, 'replace']);
     this._setProperty('pause', !!paused);
   }
 
@@ -133,6 +138,7 @@ class MpvFrontend extends PlaybackFrontend {
   async showStandby(waiting = {}) {
     this.currentQid = null;
     this.currentSource = null;
+    this._pendingSeek = 0;
     this._command(['stop']);
     const detail = waiting.nextTitle ? `\n下一档：${waiting.nextTitle}` : '';
     this._command(['show-text', `Showrunner 待机${detail}`, 5000]);
@@ -180,7 +186,7 @@ class MpvFrontend extends PlaybackFrontend {
       socket.on('data', chunk => this._onData(chunk));
       socket.on('close', retry);
       socket.on('error', error => { this.lastError = error.message; });
-      for (const [id, name] of [['time-pos', 'time-pos'], ['duration', 'duration'], ['pause', 'pause'], ['hwdec-current', 'hwdec-current']]) {
+      for (const [id, name] of [[1, 'time-pos'], [2, 'duration'], [3, 'pause'], [4, 'hwdec-current']]) {
         this._command(['observe_property', id, name]);
       }
       this.emit('ready');
@@ -207,8 +213,19 @@ class MpvFrontend extends PlaybackFrontend {
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
       if (msg.event === 'property-change') {
-        if (msg.name === 'duration') this.duration = Number(msg.data) || 0;
+        if (msg.name === 'duration') {
+          this.duration = Number(msg.data) || 0;
+          if (this.duration > 0 && this._pendingSeek) {
+            const to = this._pendingSeek;
+            this._pendingSeek = 0;
+            this.seek(to);
+          }
+        }
         if (msg.name === 'time-pos' && this.currentQid) this.emit('position', { qid: this.currentQid, position: Number(msg.data) || 0, duration: this.duration });
+      } else if (msg.request_id !== undefined && msg.error && msg.error !== 'success') {
+        // 命令级错误（如参数被拒）不会触发 end-file 事件，必须显式暴露，避免无声失败
+        this.lastError = `mpv 命令错误：${msg.error}`;
+        this.emit('change', this.status());
       } else if (msg.event === 'end-file' && this.currentQid) {
         if (msg.reason === 'eof') this.emit('ended', { qid: this.currentQid });
         else if (msg.reason === 'error') this.emit('error', { qid: this.currentQid, kind: 'mpv_error', detail: String(msg.file_error || msg.error || 'mpv 播放失败') });

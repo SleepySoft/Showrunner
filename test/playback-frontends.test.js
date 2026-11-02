@@ -52,11 +52,16 @@ test('MpvFrontend 使用受控参数和 IPC，拒绝任意路径', async () => {
   assert.ok(launched.args.includes('--fullscreen'));
   assert.ok(launched.args.includes('--title=Showrunner'));
   assert.ok(launched.args.some(arg => arg.startsWith('--input-ipc-server=')));
+  const observe = socket.writes.filter(msg => msg.command[0] === 'observe_property');
+  assert.ok(observe.length >= 4 && observe.every(msg => Number.isInteger(msg.command[1])),
+    'observe_property 必须用数字 reply id，否则 mpv 拒绝（invalid parameter）');
   assert.equal(mpv.status().ipcConnected, true);
 
   await assert.rejects(() => mpv.load({ kind: 'file', uri: path.resolve('movie.mkv') }), /受信任/);
   await mpv.load({ kind: 'file', uri: path.resolve('movie.mkv'), trusted: true }, { qid: 'q1', position: 12 });
-  assert.ok(socket.writes.some(msg => msg.command[0] === 'loadfile' && msg.command[2] === 'replace'));
+  const loadMsg = socket.writes.find(msg => msg.command[0] === 'loadfile');
+  assert.ok(loadMsg && loadMsg.command[2] === 'replace');
+  assert.equal(loadMsg.command.length, 3); // 不带 start= options：mpv 0.41 会拒绝第 4 个参数
 
   const positions = [], ended = [], inputs = [];
   mpv.on('position', value => positions.push(value));
@@ -71,6 +76,11 @@ test('MpvFrontend 使用受控参数和 IPC，拒绝任意路径', async () => {
   assert.deepEqual(positions[0], { qid: 'q1', position: 15, duration: 100 });
   assert.deepEqual(ended[0], { qid: 'q1' });
   assert.deepEqual(inputs, ['menu']);
+  // duration 到达后补 seek 到起始位置 12（替代被 mpv 0.41 拒绝的 loadfile start= 参数）
+  assert.ok(socket.writes.some(msg => msg.command[0] === 'seek' && msg.command[1] === 12 && msg.command[2] === 'absolute+exact'));
+  // 命令级错误必须暴露到状态，避免无声失败
+  socket.emit('data', Buffer.from(JSON.stringify({ request_id: 999, error: 'invalid parameter' }) + '\n'));
+  assert.match(mpv.status().lastError, /invalid parameter/);
   await mpv.stop();
   assert.equal(proc.killed, true);
 });

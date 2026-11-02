@@ -51,6 +51,7 @@ test('MpvFrontend 使用受控参数和 IPC，拒绝任意路径', async () => {
   assert.equal(launched.exe, 'C:\\fake\\mpv.exe');
   assert.ok(launched.args.includes('--fullscreen'));
   assert.ok(launched.args.includes('--no-config'), '必须忽略用户 profile 配置（volume=0/静音会让 mpv 无声）');
+  assert.ok(launched.args.includes('--af=loudnorm'), '默认开启响度均衡');
   assert.ok(!launched.args.some(arg => arg.startsWith('--log-file=')), '未提供 logPath 时不写日志文件');
   assert.ok(launched.args.includes('--title=Showrunner'));
   assert.ok(launched.args.some(arg => arg.startsWith('--input-ipc-server=')));
@@ -167,6 +168,43 @@ test('MpvFrontend 音频健康检查：有音轨但 ao 为空时只报一次 aud
   await new Promise(resolve => setTimeout(resolve, 80));
   assert.equal(failures.length, 1);
   await mpv.stop();
+});
+
+test('FrontendSupervisor 音量均衡开关：持久化、同步 mpv 参数、运行时重启一次', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = true;
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  mpv.setNormalizeCalls = [];
+  mpv.setNormalize = v => mpv.setNormalizeCalls.push(v);
+  const saved = [];
+  const supervisor = new FrontendSupervisor({
+    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver: {}, manage: true, watchdog: false,
+    onVolumeNormalizeChange: enabled => saved.push(enabled)
+  });
+  await supervisor.start();
+  assert.equal(supervisor.status().volumeNormalize, true, '默认开启');
+  const s = await supervisor.setVolumeNormalize(false);
+  assert.equal(s.volumeNormalize, false);
+  assert.deepEqual(saved, [false], '先持久化');
+  assert.deepEqual(mpv.setNormalizeCalls, [false], '同步 mpv 参数');
+  assert.ok(!mpv.calls.includes('stop'), 'mpv 未运行时只改参数不重启');
+  const again = await supervisor.setVolumeNormalize(false);
+  assert.equal(again.volumeNormalize, false);
+  assert.deepEqual(saved, [false], '值未变化时不重复持久化');
+
+  // mpv 运行中切换 → 重启使其生效
+  const resolver = { resolve: () => ({ status: 'ready', source: { kind: 'file', uri: path.resolve('episode.mkv'), trusted: true } }) };
+  const sup2 = new FrontendSupervisor({
+    browser: new FakeBrowser('offline'), frontends: { chrome, mpv }, selected: 'mpv', resolver, manage: true,
+    onVolumeNormalizeChange: () => {}
+  });
+  await sup2.start();
+  await sup2.sync({ status: 'playing', position: 0, volume: 1, updatedAt: 1, current: { qid: 'q1', type: 'local' } });
+  mpv.calls.length = 0;
+  await sup2.setVolumeNormalize(false);
+  assert.deepEqual(mpv.calls.filter(c => c === 'stop'), ['stop'], '运行中切换立即重启一次');
+  assert.ok(mpv.calls.includes('start'));
 });
 
 test('FrontendSupervisor 收到 audioFailed 后重启 mpv，同一节目只重启一次', async () => {

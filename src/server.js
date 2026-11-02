@@ -169,10 +169,11 @@ function createApp(cfg) {
   const resolver = new PlayableSourceResolver({ library, cache });
   const chromeFrontend = new ChromeFrontend(browserProcess);
   const mpvLogFile = cfg.mpvLogPath || path.join(path.dirname(cfg.dataFile), 'logs', 'mpv.log');
+  const volumeNormalize = cfg.volumeNormalize === undefined ? true : !!cfg.volumeNormalize;
   const mpvFrontend = cfg.mpvFrontend || new MpvFrontend({
     mpvPath: findMpv(cfg.mpvPath, cfg.rootDir), rootDir: cfg.rootDir,
     ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf, windowed: !kioskBrowser,
-    logPath: mpvLogFile
+    logPath: mpvLogFile, normalize: volumeNormalize
   });
   const frontendSupervisor = cfg.frontendSupervisor || new FrontendSupervisor({
     browser: browserProcess,
@@ -181,8 +182,10 @@ function createApp(cfg) {
     resolver,
     manage: !!cfg.manageBrowser,
     watchdog: frontendWatchdog,
+    volumeNormalize,
     initialMode,
-    onSelectionChange: type => saveConfigPatch(cfg.configFile || path.join(cfg.rootDir, 'config.json'), { playerFrontend: type })
+    onSelectionChange: type => saveConfigPatch(cfg.configFile || path.join(cfg.rootDir, 'config.json'), { playerFrontend: type }),
+    onVolumeNormalizeChange: enabled => saveConfigPatch(cfg.configFile || path.join(cfg.rootDir, 'config.json'), { volumeNormalize: enabled })
   });
   const siteCollectionImporter = cfg.siteCollectionImporter || (async url => {
     if (!ytdlp) return { ok: false, error: '未找到 yt-dlp，无法解析网站合集' };

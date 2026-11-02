@@ -827,6 +827,13 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
     res.json(await frontendSupervisor.setWatchdog(!!req.body?.enabled));
   });
 
+  // 音量均衡（mpv loudnorm）：仅 mpv 前端生效；mpv 运行时切换会自动重启它
+  router.post('/playback/normalize', async (req, res) => {
+    const result = await frontendSupervisor.setVolumeNormalize(!!req.body?.enabled);
+    if (result.error) return res.status(500).json(result);
+    res.json(result);
+  });
+
   router.post('/playback/power', async (req, res) => {
     const action = String(req.body?.action || '');
     if (action === 'open') return res.json(await frontendSupervisor.openFrontend());

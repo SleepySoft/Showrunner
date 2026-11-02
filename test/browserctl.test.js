@@ -192,6 +192,7 @@ before(async () => {
     host: '127.0.0.1', port: 0,
     password: 'pw', mediaDirs: [],
     dataFile: path.join(tmp, 'data.json'),
+    configFile: path.join(tmp, 'config.json'), // 隔离机器级配置，避免写默认数据目录
     cacheDir: path.join(tmp, 'cache'),
     disableCache: true,
     sessionTtlHours: 1
@@ -228,6 +229,18 @@ test('POST /api/playback/watchdog 与 /api/playback/power（托管关闭时手�
   assert.ok(bad.error.includes('open 或 close'));
   const r = await (await authed('/api/playback/power', { method: 'POST', body: JSON.stringify({ action: 'open' }) })).json();
   assert.equal(r.ok, false);
+});
+
+test('POST /api/playback/normalize 切换音量均衡并持久化到 config.json', async () => {
+  const s = await (await authed('/api/playback/normalize', { method: 'POST', body: JSON.stringify({ enabled: false }) })).json();
+  assert.equal(s.volumeNormalize, false);
+  const cfg = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8'));
+  assert.equal(cfg.volumeNormalize, false);
+  const s2 = await (await authed('/api/playback/normalize', { method: 'POST', body: JSON.stringify({ enabled: true }) })).json();
+  assert.equal(s2.volumeNormalize, true);
+  const cfg2 = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8'));
+  assert.equal(cfg2.volumeNormalize, true);
+  assert.equal((await fetch(base + '/api/playback/normalize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) })).status, 401);
 });
 
 test('POST /api/mode 切换模式', async () => {

@@ -435,6 +435,7 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 - `GET /api/playback/frontend`：返回与 `/api/mode` 相同的前端、可用性、进程和 IPC 状态，不包含绝对媒体路径。
 - `PUT /api/playback/frontend`，请求 `{ "type": "chrome" }` 或 `{ "type": "mpv" }`：串行停止旧前端并启动新前端。成功后保存机器级配置；未注册类型返回 400，启动失败返回 409 并恢复旧前端。
 - `POST /api/playback/watchdog`，请求 `{ "enabled": true | false }`：看门狗（自动拉起）开关，持久化在 `settings.frontendWatchdog`。开启时按模式自动拉起前端、崩溃自动重拉；关闭时停止当前前端并保持关闭。状态里的 `watchdog` 字段反映当前值。
+- `POST /api/playback/normalize`，请求 `{ "enabled": true | false }`：音量均衡开关（mpv `--af=loudnorm`，EBU R128 响度归一），默认开启，持久化在机器级配置 `volumeNormalize`。仅 mpv 前端生效；mpv 正在运行时会自动重启它使参数生效（播放中断几秒）。状态里的 `volumeNormalize` 字段反映当前值。
 - `POST /api/playback/power`，请求 `{ "action": "open" | "close" }`：手动打开/关闭所选前端。`open` 是一次性启动（不改变看门狗）；`close` 停止前端并同时停用看门狗，保证关闭后不再被自动拉起。前端未托管或处于下线/维护模式时返回 `{ "ok": false, "error": ... }`。
 - 不变量：mpv 进程与 Chrome 窗口（kiosk 或窗口化）统一由服务端管理，任一时刻要么全关、要么最多一个运行。
 

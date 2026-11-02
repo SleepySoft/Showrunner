@@ -339,6 +339,7 @@
         <div class="actions">
           <select id="frontendSelect"><option value="chrome">Chrome kiosk</option><option value="mpv">mpv 本地播放器</option></select>
           <label title="自动拉起：崩溃自动重拉、重启自动开播；关闭后保持关闭，可手动打开"><input type="checkbox" id="frontendWatchdog">自动拉起</label>
+          <label id="normalizeLabel" title="mpv 响度均衡（EBU R128 loudnorm）：大小声源自动拉到统一响度；仅 mpv 前端支持"><input type="checkbox" id="frontendNormalize">音量均衡</label>
           <button id="btnFrontendPower">打开</button>
         </div>
       </div>
@@ -711,6 +712,10 @@ function renderMode() {
   $('frontendLabel').textContent = `播放前端：${modeStatus.frontend === 'mpv' ? 'mpv' : 'Chrome'}${player.lastError ? '（异常）' : ''}${running ? ' · 运行中' : ' · 已关闭'}`;
   $('frontendSelect').title = player.lastError || '';
   $('frontendWatchdog').checked = !!modeStatus.watchdog;
+  const mpvSelected = modeStatus.frontend === 'mpv';
+  $('frontendNormalize').checked = modeStatus.volumeNormalize !== false;
+  $('frontendNormalize').disabled = !mpvSelected; // 仅 mpv 支持响度均衡
+  $('normalizeLabel').style.opacity = mpvSelected ? '' : '0.5';
   const power = $('btnFrontendPower');
   power.textContent = running ? '关闭' : '打开';
   power.title = running ? '关闭播放前端，同时停用自动拉起' : '手动打开播放前端（一次性）';
@@ -769,6 +774,18 @@ $('frontendWatchdog').onchange = async () => {
     alert('自动拉起设置失败：' + error.message);
     await refreshMode();
   } finally { $('frontendWatchdog').disabled = false; }
+};
+$('frontendNormalize').onchange = async () => {
+  const enabled = $('frontendNormalize').checked;
+  $('frontendNormalize').disabled = true;
+  try {
+    modeStatus = await api('/playback/normalize', { method: 'POST', body: { enabled } });
+    if (modeStatus.error) alert(modeStatus.error);
+    renderMode();
+  } catch (error) {
+    alert('音量均衡设置失败：' + error.message);
+    await refreshMode();
+  } finally { $('frontendNormalize').disabled = $('frontendSelect').value !== 'mpv'; }
 };
 $('btnFrontendPower').onclick = async () => {
   const running = !!modeStatus?.playerRunning;

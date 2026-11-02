@@ -43,7 +43,7 @@ function cleanupManagedMpv() {
 }
 
 class MpvFrontend extends PlaybackFrontend {
-  constructor({ mpvPath, rootDir, ipcPath = defaultIpcPath(), inputConf, windowed = false, logPath = null, audioWatchIntervalMs = 10000, spawnImpl = spawn, connectImpl = p => net.createConnection(p), cleanupImpl = cleanupManagedMpv, available } = {}) {
+  constructor({ mpvPath, rootDir, ipcPath = defaultIpcPath(), inputConf, windowed = false, logPath = null, normalize = true, audioWatchIntervalMs = 10000, spawnImpl = spawn, connectImpl = p => net.createConnection(p), cleanupImpl = cleanupManagedMpv, available } = {}) {
     super('mpv');
     this.mpvPath = mpvPath || findMpv(null, rootDir);
     this.available = available === undefined ? !!this.mpvPath : !!available;
@@ -51,6 +51,7 @@ class MpvFrontend extends PlaybackFrontend {
     this.inputConf = inputConf || path.join(__dirname, 'mpv-input.conf');
     this.windowed = !!windowed;
     this.logPath = logPath || null;
+    this.normalize = normalize !== false;
     this.audioWatchIntervalMs = Number(audioWatchIntervalMs) > 0 ? Number(audioWatchIntervalMs) : 10000;
     this.spawnImpl = spawnImpl;
     this.connectImpl = connectImpl;
@@ -92,6 +93,9 @@ class MpvFrontend extends PlaybackFrontend {
       // 不受用户 profile 配置干扰：另一台机器实证过用户 mpv.conf（如 volume=0/静音）
       // 会导致画面正常但完全无声。--input-conf 显式传入，在 --no-config 下仍加载。
       '--no-config',
+      // 响度均衡（EBU R128 loudnorm 动态模式）：大小声源自动拉到统一响度，
+      // 实测 CPU 开销约 +8% 单核；只影响 mpv 前端
+      ...(this.normalize ? ['--af=loudnorm'] : []),
       `--input-ipc-server=${this.ipcPath}`, `--input-conf=${this.inputConf}`,
       // 音频初始化失败只会写在 mpv 自己的日志里（AO init failed / no audio），
       // stdout 被丢弃，必须有日志文件才能在遥控器诊断页看到原因
@@ -157,6 +161,8 @@ class MpvFrontend extends PlaybackFrontend {
   async pause() { this._setProperty('pause', true); }
   async seek(position) { this._command(['seek', Math.max(0, Number(position) || 0), 'absolute+exact']); }
   async setVolume(volume) { this._setProperty('volume', Math.max(0, Math.min(100, Number(volume) * 100))); }
+  /** 响度均衡开关；只作用于下一次启动的启动参数，切换后需重启 mpv 生效。 */
+  setNormalize(on) { this.normalize = !!on; }
   async showStandby(waiting = {}) {
     this.currentQid = null;
     this.currentSource = null;

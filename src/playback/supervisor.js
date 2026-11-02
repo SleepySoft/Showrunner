@@ -9,7 +9,7 @@ const { EventEmitter } = require('events');
  * 关闭时：前端保持关闭，只能由 openFrontend() 手动打开。
  */
 class FrontendSupervisor extends EventEmitter {
-  constructor({ browser, frontends, selected = 'chrome', resolver, manage = true, watchdog = true, initialMode = 'normal', onSelectionChange, relaunchCooldownMs = 5000 }) {
+  constructor({ browser, frontends, selected = 'chrome', resolver, manage = true, watchdog = true, volumeNormalize = true, initialMode = 'normal', onSelectionChange, onVolumeNormalizeChange, relaunchCooldownMs = 5000 }) {
     super();
     this.browser = browser;
     this.frontends = frontends;
@@ -18,8 +18,10 @@ class FrontendSupervisor extends EventEmitter {
     this.manageBrowser = typeof browser.manage === 'boolean' ? !!browser.manage : !!manage;
     this.manage = !!manage;
     this.watchdog = !!watchdog;
+    this.volumeNormalize = volumeNormalize !== false;
     this.mode = initialMode === 'offline' ? 'offline' : 'normal';
     this.onSelectionChange = onSelectionChange;
+    this.onVolumeNormalizeChange = onVolumeNormalizeChange;
     this.relaunchCooldownMs = relaunchCooldownMs;
     this._transition = Promise.resolve();
     this._lastState = null;
@@ -62,6 +64,7 @@ class FrontendSupervisor extends EventEmitter {
       manageBrowser: this.manageBrowser,
       manageFrontend: this.manage,
       watchdog: this.watchdog,
+      volumeNormalize: this.volumeNormalize,
       frontend: this.selected,
       playerRunning: !!player?.running,
       kioskRunning: this.selected === 'chrome' && !!browser.kioskRunning,
@@ -132,6 +135,29 @@ class FrontendSupervisor extends EventEmitter {
       this.emit('change', this.status());
       return { ok: true, status: this.status() };
     });
+  }
+
+  /**
+   * 音量均衡（mpv loudnorm）开关。先持久化，再更新 mpv 启动参数；
+   * mpv 正在运行时重启它使参数生效（切换瞬间播放会中断几秒）。
+   */
+  async setVolumeNormalize(enabled) {
+    enabled = !!enabled;
+    if (enabled === this.volumeNormalize) return this.status();
+    try { await this.onVolumeNormalizeChange?.(enabled); }
+    catch (error) { return { ...this.status(), error: `设置保存失败：${error.message}` }; }
+    this.volumeNormalize = enabled;
+    this.frontends.mpv?.setNormalize?.(enabled);
+    if (this.mode === 'normal' && this.selected === 'mpv' && this.frontends.mpv.status().running) {
+      await this._serial(async () => {
+        if (this.mode !== 'normal' || this.selected !== 'mpv') return;
+        await this.frontends.mpv.stop();
+        await this.frontends.mpv.start();
+        await this.sync(this._lastState);
+      });
+    }
+    this.emit('change', this.status());
+    return this.status();
   }
 
   async _applyMode(mode) {

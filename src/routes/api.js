@@ -18,7 +18,7 @@ const { isDirectPrivateRequest } = require('../password-recovery');
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, frontendSupervisor, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
+function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, frontendSupervisor, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick, mpvLogFile }) {
   const router = express.Router();
   router.use(express.json({ limit: '10mb' }));
 
@@ -178,9 +178,35 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       events: playbackIssues ? playbackIssues.recent(req.query.limit) : [],
-      compatibility: compatibility ? compatibility.brief() : []
+      compatibility: compatibility ? compatibility.brief() : [],
+      mpvLog: tailMpvLog()
     });
   });
+
+  // mpv 日志尾部：mpv 把音频/视频初始化的真实原因写在这里（stdout 被丢弃），
+  // 排查“画面正常但无声”等问题的第一手材料。绝对路径一律打码。
+  function tailMpvLog(maxLines = 120) {
+    try {
+      if (!mpvLogFile || !fs.existsSync(mpvLogFile)) return [];
+      const stat = fs.statSync(mpvLogFile);
+      const fd = fs.openSync(mpvLogFile, 'r');
+      let buf;
+      try {
+        const size = Math.min(stat.size, 64 * 1024);
+        buf = Buffer.alloc(size);
+        fs.readSync(fd, buf, 0, size, stat.size - size);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return buf.toString('utf8')
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .slice(-maxLines)
+        .map(line => line.replace(/[A-Za-z]:[\\/][^'"\s]*(?=[\s'"]|$)/g, '<路径>'));
+    } catch {
+      return [];
+    }
+  }
 
   router.delete('/cache/:key', (req, res) => {
     if (!cache || !cache.remove(req.params.key)) return res.status(404).json({ error: 'not found' });

@@ -168,9 +168,11 @@ function createApp(cfg) {
   });
   const resolver = new PlayableSourceResolver({ library, cache });
   const chromeFrontend = new ChromeFrontend(browserProcess);
+  const mpvLogFile = cfg.mpvLogPath || path.join(path.dirname(cfg.dataFile), 'logs', 'mpv.log');
   const mpvFrontend = cfg.mpvFrontend || new MpvFrontend({
     mpvPath: findMpv(cfg.mpvPath, cfg.rootDir), rootDir: cfg.rootDir,
-    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf, windowed: !kioskBrowser
+    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf, windowed: !kioskBrowser,
+    logPath: mpvLogFile
   });
   const frontendSupervisor = cfg.frontendSupervisor || new FrontendSupervisor({
     browser: browserProcess,
@@ -431,6 +433,16 @@ function createApp(cfg) {
     if (!event.qid || event.qid === queue.current()?.qid) handleChannelEnded();
   });
   frontendSupervisor.on('playbackError', handlePlaybackIssue);
+  // mpv 音频输出未启动：只记录不跳过节目（片源没问题，重启后通常会恢复有声）
+  frontendSupervisor.on('audioFailed', event => {
+    const current = queue.current();
+    if (!current || !event?.qid || event.qid !== current.qid) return;
+    playbackIssues.record({
+      kind: 'mpv_no_audio',
+      detail: 'mpv 检测到文件含音轨但音频输出未启动（常见于系统默认音频设备不可用或被独占，重启播放前端后通常会恢复）',
+      qid: current.qid
+    }, queue.getPublicState().current || current, queue.playback);
+  });
   frontendSupervisor.on('input', handleFrontendInput);
   queue.on('change', () => frontendSupervisor.sync(getTvState()));
 
@@ -514,7 +526,7 @@ function createApp(cfg) {
   // 遥控器：静态页 + API
   app.use('/remote', express.static(path.join(cfg.rootDir, 'public', 'remote')));
   const onPasswordChange = hash => savePasswordHash(cfg.configFile || path.join(cfg.rootDir, 'config.json'), hash);
-  app.use('/api', apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, frontendSupervisor, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
+  app.use('/api', apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, frontendSupervisor, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick, mpvLogFile }));
 
   app.get('/', (req, res) => res.redirect('/remote/'));
 

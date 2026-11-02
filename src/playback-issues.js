@@ -5,7 +5,7 @@ const path = require('path');
 
 const ALLOWED_KINDS = new Set([
   'source_error', 'media_error', 'play_rejected', 'frozen', 'unexpected_pause', 'stalled',
-  'compatibility_fallback', 'compatibility_failed'
+  'compatibility_fallback', 'compatibility_failed', 'mpv_no_audio'
 ]);
 
 class PlaybackIssueLogger {

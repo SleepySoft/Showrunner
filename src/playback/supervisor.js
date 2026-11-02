@@ -32,6 +32,7 @@ class FrontendSupervisor extends EventEmitter {
       frontend.on('position', event => this.emit('position', event));
       frontend.on('ended', event => this.emit('ended', event));
       frontend.on('error', event => this.emit('playbackError', event));
+      frontend.on('audioFailed', event => { this.emit('audioFailed', event); this._restartAfterAudioFailure(); });
       frontend.on('input', action => this.emit('input', action));
       frontend.on('ready', () => this.sync(this._lastState));
       frontend.on('exit', () => this._scheduleRestart());
@@ -257,6 +258,25 @@ class FrontendSupervisor extends EventEmitter {
       await this.sync(this._lastState);
     }), this.relaunchCooldownMs);
     this._restartTimer.unref?.();
+  }
+
+  /**
+   * mpv 报告音频输出未启动（文件有音轨但 ao 为空）：重启 mpv 让音频设备重新初始化。
+   * 同一节目只重启一次，避免设备确实不可用时陷入重启循环。
+   */
+  async _restartAfterAudioFailure() {
+    if (!this.manage || this.mode !== 'normal' || this.selected !== 'mpv') return;
+    const key = this._lastLoadKey;
+    if (!key || this._audioRestartedKey === key) return;
+    this._audioRestartedKey = key;
+    clearTimeout(this._restartTimer);
+    await this._serial(async () => {
+      if (this.mode !== 'normal' || this.selected !== 'mpv') return;
+      if (!this.frontends.mpv.status().running) return;
+      await this.frontends.mpv.stop();
+      await this.frontends.mpv.start();
+      await this.sync(this._lastState);
+    });
   }
 
   _serial(action) {

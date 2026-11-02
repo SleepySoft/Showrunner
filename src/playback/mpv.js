@@ -43,13 +43,15 @@ function cleanupManagedMpv() {
 }
 
 class MpvFrontend extends PlaybackFrontend {
-  constructor({ mpvPath, rootDir, ipcPath = defaultIpcPath(), inputConf, windowed = false, spawnImpl = spawn, connectImpl = p => net.createConnection(p), cleanupImpl = cleanupManagedMpv, available } = {}) {
+  constructor({ mpvPath, rootDir, ipcPath = defaultIpcPath(), inputConf, windowed = false, logPath = null, audioWatchIntervalMs = 10000, spawnImpl = spawn, connectImpl = p => net.createConnection(p), cleanupImpl = cleanupManagedMpv, available } = {}) {
     super('mpv');
     this.mpvPath = mpvPath || findMpv(null, rootDir);
     this.available = available === undefined ? !!this.mpvPath : !!available;
     this.ipcPath = ipcPath;
     this.inputConf = inputConf || path.join(__dirname, 'mpv-input.conf');
     this.windowed = !!windowed;
+    this.logPath = logPath || null;
+    this.audioWatchIntervalMs = Number(audioWatchIntervalMs) > 0 ? Number(audioWatchIntervalMs) : 10000;
     this.spawnImpl = spawnImpl;
     this.connectImpl = connectImpl;
     this.cleanupImpl = cleanupImpl;
@@ -61,9 +63,13 @@ class MpvFrontend extends PlaybackFrontend {
     this.duration = 0;
     this.lastError = null;
     this._requestId = 0;
+    this._pendingQueries = new Map(); // request_id -> 查询 resolve（健康检查用）
     this._pendingSeek = 0; // 文件载入完成（拿到 duration）后再补的起始位置
     this._stopping = false;
     this._connectTimer = null;
+    this._audioWatchTimer = null;
+    this._audioMisses = 0;
+    this._audioFailedReported = false;
   }
 
   async start() {
@@ -76,13 +82,20 @@ class MpvFrontend extends PlaybackFrontend {
     this._stopping = false;
     await this.cleanupImpl();
     if (process.platform !== 'win32') { try { fs.unlinkSync(this.ipcPath); } catch {} }
+    if (this.logPath) { try { fs.mkdirSync(path.dirname(this.logPath), { recursive: true }); } catch {} }
     // 开发/调试的窗口化模式用最大化普通窗口代替全屏置顶无边框，保证可自由操作
     const args = [
       ...(this.windowed ? ['--window-maximized'] : ['--fullscreen', '--ontop', '--no-border']),
       '--idle=yes', '--force-window=yes',
       '--no-osc', ...(this.windowed ? [] : ['--cursor-autohide=always']),
       '--hwdec=auto-safe', '--keep-open=no', '--title=Showrunner',
-      `--input-ipc-server=${this.ipcPath}`, `--input-conf=${this.inputConf}`
+      // 不受用户 profile 配置干扰：另一台机器实证过用户 mpv.conf（如 volume=0/静音）
+      // 会导致画面正常但完全无声。--input-conf 显式传入，在 --no-config 下仍加载。
+      '--no-config',
+      `--input-ipc-server=${this.ipcPath}`, `--input-conf=${this.inputConf}`,
+      // 音频初始化失败只会写在 mpv 自己的日志里（AO init failed / no audio），
+      // stdout 被丢弃，必须有日志文件才能在遥控器诊断页看到原因
+      ...(this.logPath ? [`--log-file=${this.logPath}`] : [])
     ];
     try {
       const proc = this.spawnImpl(this.mpvPath, args, { stdio: 'ignore', windowsHide: true });
@@ -104,7 +117,13 @@ class MpvFrontend extends PlaybackFrontend {
     this._stopping = true;
     clearTimeout(this._connectTimer);
     this._connectTimer = null;
+    clearTimeout(this._audioWatchTimer);
+    this._audioWatchTimer = null;
     this._pendingSeek = 0;
+    this._audioMisses = 0;
+    this._audioFailedReported = false;
+    for (const finish of this._pendingQueries.values()) finish(null);
+    this._pendingQueries.clear();
     const socket = this.socket;
     this.socket = null;
     try { socket?.destroy(); } catch {}
@@ -127,8 +146,11 @@ class MpvFrontend extends PlaybackFrontend {
     // 不带第 4 个 options 参数：mpv 0.41 的 loadfile 会拒绝 start= 形式（invalid parameter）。
     // 起始位置改为载入完成（duration 到达）后补一次 seek，兼容所有构建。
     this._pendingSeek = Math.max(0, Number(position) || 0);
+    this._audioMisses = 0;
+    this._audioFailedReported = false;
     this._command(['loadfile', source.uri, 'replace']);
     this._setProperty('pause', !!paused);
+    this._scheduleAudioWatch();
   }
 
   async play() { this._setProperty('pause', false); }
@@ -139,6 +161,8 @@ class MpvFrontend extends PlaybackFrontend {
     this.currentQid = null;
     this.currentSource = null;
     this._pendingSeek = 0;
+    this._audioMisses = 0;
+    this._audioFailedReported = false;
     this._command(['stop']);
     const detail = waiting.nextTitle ? `\n下一档：${waiting.nextTitle}` : '';
     this._command(['show-text', `Showrunner 待机${detail}`, 5000]);
@@ -189,6 +213,11 @@ class MpvFrontend extends PlaybackFrontend {
       for (const [id, name] of [[1, 'time-pos'], [2, 'duration'], [3, 'pause'], [4, 'hwdec-current']]) {
         this._command(['observe_property', id, name]);
       }
+      // 系统音量合成器会按应用记住 mpv 的静音状态并跨重启保留（HTPC 上常见
+      // “换 Chrome 有声、mpv 无声”的元凶之一），启动即显式解除；
+      // 音量数值由 supervisor 按队列权威状态同步。
+      this._setProperty('mute', false);
+      this._scheduleAudioWatch();
       this.emit('ready');
       this.emit('change', this.status());
     });
@@ -204,6 +233,69 @@ class MpvFrontend extends PlaybackFrontend {
   }
   _setProperty(name, value) { return this._command(['set_property', name, value]); }
 
+  /** 带超时的属性查询：响应按 request_id 路由，不污染 lastError。 */
+  _queryProperty(name, timeoutMs = 3000) {
+    return new Promise(resolve => {
+      if (!this.socket) return resolve(null);
+      const id = ++this._requestId;
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this._pendingQueries.delete(id);
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      timer.unref?.();
+      this._pendingQueries.set(id, finish);
+      try {
+        this.socket.write(JSON.stringify({ command: ['get_property', name], request_id: id }) + '\n');
+      } catch { finish(null); }
+    });
+  }
+
+  _scheduleAudioWatch() {
+    clearTimeout(this._audioWatchTimer);
+    this._audioWatchTimer = setTimeout(() => {
+      this._audioWatchTimer = null;
+      this._checkAudioHealth();
+    }, this.audioWatchIntervalMs);
+    this._audioWatchTimer.unref?.();
+  }
+
+  /**
+   * 音频输出健康检查：文件含音轨但 current-ao 持续为空 = 音频设备初始化失败
+   * （电视未开/HDMI 设备独占等），mpv 会无声地继续放画面。
+   * 注意 mpv 0.41 的 `ao` 属性即使输出正常也返回 []，必须用 `current-ao`（实测）。
+   * 连续 2 次确认后报 audioFailed，由 supervisor 重启 mpv 重试。
+   */
+  async _checkAudioHealth() {
+    if (!this.socket || !this.currentQid || this._stopping) return;
+    try {
+      const [codec, currentAo] = await Promise.all([
+        this._queryProperty('audio-codec'),
+        this._queryProperty('current-ao')
+      ]);
+      if (!this.socket || !this.currentQid || this._stopping) return;
+      const hasAudio = !!codec;
+      const aoActive = !!currentAo;
+      if (hasAudio && !aoActive) {
+        this._audioMisses += 1;
+        if (this._audioMisses >= 2 && !this._audioFailedReported) {
+          this._audioFailedReported = true;
+          this.lastError = 'mpv 音频输出未启动（系统音频设备可能不可用）';
+          this.emit('audioFailed', { qid: this.currentQid });
+          this.emit('change', this.status());
+          return;
+        }
+      } else {
+        this._audioMisses = 0;
+      }
+    } catch { /* 查询异常下轮再试 */ }
+    this._scheduleAudioWatch();
+  }
+
   _onData(chunk) {
     this.buffer += chunk.toString('utf8');
     for (;;) {
@@ -212,6 +304,12 @@ class MpvFrontend extends PlaybackFrontend {
       const line = this.buffer.slice(0, pos); this.buffer = this.buffer.slice(pos + 1);
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.request_id !== undefined && this._pendingQueries.has(msg.request_id)) {
+        const finish = this._pendingQueries.get(msg.request_id);
+        this._pendingQueries.delete(msg.request_id);
+        finish(msg.error === 'success' ? msg.data : null);
+        continue;
+      }
       if (msg.event === 'property-change') {
         if (msg.name === 'duration') {
           this.duration = Number(msg.data) || 0;

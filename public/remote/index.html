@@ -441,6 +441,7 @@
     <div class="add-hint" style="margin:0 0 12px">记录格式不支持、解码失败、卡住、NAS 读取异常及兼容转换结果。时间按当前设备时区显示。</div>
     <div id="compatJobs"></div>
     <div id="playbackLogs"></div>
+    <div id="mpvLogWrap"></div>
   </section>
 </main>
 
@@ -1593,12 +1594,15 @@ document.querySelectorAll('nav button').forEach(btn => {
 const LOG_KIND = {
   media_error: '媒体格式/解码错误', source_error: '片源错误', play_rejected: '浏览器拒绝播放',
   frozen: '播放卡住', unexpected_pause: '意外暂停', stalled: '读取停滞',
-  compatibility_fallback: '已启动兼容转换', compatibility_failed: '兼容转换失败'
+  compatibility_fallback: '已启动兼容转换', compatibility_failed: '兼容转换失败',
+  mpv_no_audio: 'mpv 音频输出未启动'
 };
 async function renderDiagnostics() {
   const logs = $('playbackLogs');
   const jobs = $('compatJobs');
+  const mpvWrap = $('mpvLogWrap');
   logs.innerHTML = '<div class="empty">正在读取…</div>';
+  mpvWrap.innerHTML = '';
   try {
     const result = await api('/diagnostics/playback?limit=200');
     const conversions = result.compatibility || [];
@@ -1624,6 +1628,16 @@ async function renderDiagnostics() {
         <div class="meta">${esc(at)}${mediaState ? ' · ' + esc(mediaState) : ''}</div>
         <div class="detail">${esc(event.detail || '无更多信息')}</div></div>`;
       logs.appendChild(div);
+    }
+    const mpvLines = result.mpvLog || [];
+    mpvWrap.innerHTML = mpvLines.length
+      ? `<div style="font-size:13px;color:var(--sub);margin:14px 0 8px">mpv 日志（最后 ${mpvLines.length} 行，排查无声/无画面看这里）</div>`
+      : '';
+    if (mpvLines.length) {
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'max-height:320px;overflow:auto;background:rgba(0,0,0,.35);border-radius:8px;padding:10px 12px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;color:var(--sub)';
+      pre.textContent = mpvLines.join('\n');
+      mpvWrap.appendChild(pre);
     }
   } catch (error) {
     jobs.innerHTML = '';

@@ -50,11 +50,15 @@ test('MpvFrontend 使用受控参数和 IPC，拒绝任意路径', async () => {
   socket.emit('connect');
   assert.equal(launched.exe, 'C:\\fake\\mpv.exe');
   assert.ok(launched.args.includes('--fullscreen'));
+  assert.ok(launched.args.includes('--no-config'), '必须忽略用户 profile 配置（volume=0/静音会让 mpv 无声）');
+  assert.ok(!launched.args.some(arg => arg.startsWith('--log-file=')), '未提供 logPath 时不写日志文件');
   assert.ok(launched.args.includes('--title=Showrunner'));
   assert.ok(launched.args.some(arg => arg.startsWith('--input-ipc-server=')));
   const observe = socket.writes.filter(msg => msg.command[0] === 'observe_property');
   assert.ok(observe.length >= 4 && observe.every(msg => Number.isInteger(msg.command[1])),
     'observe_property 必须用数字 reply id，否则 mpv 拒绝（invalid parameter）');
+  assert.ok(socket.writes.some(msg => msg.command[0] === 'set_property' && msg.command[1] === 'mute' && msg.command[2] === false),
+    '连接后必须显式解除静音，清掉系统音量合成器记住的按应用静音');
   assert.equal(mpv.status().ipcConnected, true);
 
   await assert.rejects(() => mpv.load({ kind: 'file', uri: path.resolve('movie.mkv') }), /受信任/);
@@ -101,6 +105,92 @@ test('MpvFrontend 窗口化模式不启用全屏/置顶/无边框，方便开发
   assert.ok(!launched.args.includes('--no-border'));
   assert.ok(!launched.args.includes('--cursor-autohide=always'));
   await mpv.stop();
+});
+
+test('MpvFrontend 传入 logPath 时写 mpv 日志文件并自动建目录', async () => {
+  const proc = new FakeProcess();
+  const socket = new FakeSocket();
+  const fs = require('fs');
+  const os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-mpv-log-'));
+  try {
+    const logPath = path.join(tmp, 'nested', 'logs', 'mpv.log');
+    let launched;
+    const mpv = new MpvFrontend({
+      mpvPath: 'C:\\fake\\mpv.exe', available: true, ipcPath: '\\\\.\\pipe\\test-mpv', logPath,
+      spawnImpl: (exe, args) => { launched = { exe, args }; return proc; },
+      connectImpl: () => socket, cleanupImpl: async () => {}
+    });
+    assert.equal(await mpv.start(), true);
+    assert.ok(launched.args.some(arg => arg === `--log-file=${logPath}`));
+    assert.ok(fs.existsSync(path.dirname(logPath)), '日志目录应自动创建');
+    await mpv.stop();
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('MpvFrontend 音频健康检查：有音轨但 ao 为空时只报一次 audioFailed', async () => {
+  const proc = new FakeProcess();
+  const socket = new FakeSocket();
+  // 自动应答健康检查的 get_property：文件有音轨（audio-codec）但没有活跃音频输出（current-ao 为空）
+  let aoActive = false;
+  socket.write = value => {
+    const msg = JSON.parse(String(value));
+    socket.writes.push(msg);
+    if (msg.command[0] === 'get_property' && (msg.command[1] === 'audio-codec' || msg.command[1] === 'current-ao')) {
+      const data = msg.command[1] === 'audio-codec' ? 'ac3' : (aoActive ? 'wasapi' : null);
+      setImmediate(() => socket.emit('data', Buffer.from(JSON.stringify({ request_id: msg.request_id, error: 'success', data }) + '\n')));
+    }
+    return true;
+  };
+  const failures = [];
+  const mpv = new MpvFrontend({
+    mpvPath: 'C:\\fake\\mpv.exe', available: true, ipcPath: '\\\\.\\pipe\\test-mpv',
+    audioWatchIntervalMs: 10,
+    spawnImpl: () => proc, connectImpl: () => socket, cleanupImpl: async () => {}
+  });
+  mpv.on('audioFailed', event => failures.push(event));
+  assert.equal(await mpv.start(), true);
+  await new Promise(resolve => setTimeout(resolve, 5)); // 等 _connect 注册 connect 监听
+  socket.emit('connect');
+  const timeout = new Promise((resolve, reject) => setTimeout(() => reject(new Error('audioFailed 超时未触发')), 3000));
+  await mpv.load({ kind: 'file', uri: path.resolve('movie.mkv'), trusted: true }, { qid: 'q1' });
+  await Promise.race([new Promise(resolve => mpv.once('audioFailed', resolve)), timeout]);
+  assert.match(mpv.status().lastError, /音频输出/);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(failures.length, 1, '同一加载只报一次，不刷屏');
+
+  // 音频输出恢复后不再误报
+  aoActive = true;
+  await mpv.load({ kind: 'file', uri: path.resolve('movie.mkv'), trusted: true }, { qid: 'q2' });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(failures.length, 1);
+  await mpv.stop();
+});
+
+test('FrontendSupervisor 收到 audioFailed 后重启 mpv，同一节目只重启一次', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = true;
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  const resolver = { resolve: () => ({ status: 'ready', source: { kind: 'file', uri: path.resolve('episode.mkv'), trusted: true } }) };
+  const supervisor = new FrontendSupervisor({ browser, frontends: { chrome, mpv }, selected: 'mpv', resolver, manage: true });
+  await supervisor.start();
+  await supervisor.sync({ status: 'playing', position: 0, volume: 1, updatedAt: 1, current: { qid: 'q1', type: 'local' } });
+  const restarts = () => mpv.calls.filter(c => c === 'stop').length;
+  mpv.emit('audioFailed', { qid: 'q1' });
+  for (let i = 0; i < 100 && restarts() === 0; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(restarts(), 1, '第一次 audioFailed 触发重启');
+  assert.ok(mpv.calls.includes('start'));
+  mpv.emit('audioFailed', { qid: 'q1' });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(restarts(), 1, '同一节目不重复重启');
+
+  await supervisor.sync({ status: 'playing', position: 0, volume: 1, updatedAt: 2, current: { qid: 'q2', type: 'local' } });
+  mpv.emit('audioFailed', { qid: 'q2' });
+  for (let i = 0; i < 100 && restarts() === 1; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(restarts(), 2, '新节目允许再次重启');
 });
 
 test('ChromeFrontend 统一走控制器：非普通模式先切回，再 ensureRunning 保证实例在跑', async () => {

@@ -191,6 +191,12 @@
   .sheet-head { padding: 14px 16px; border-bottom: 1px solid var(--line); }
   .sheet-head .p { font-size: 13px; color: var(--sub); word-break: break-all; }
   .sheet-head .p b { color: var(--text); font-weight: 600; }
+  .col-name-input {
+    flex: 1; min-width: 0; max-width: 340px; font-size: 15px; font-weight: 600;
+    padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); color: var(--text);
+  }
+  .col-name-input:focus { border-color: var(--text); outline: none; }
   .sheet-tabs { display: flex; gap: 4px; padding: 10px 16px 0; }
   .sheet-tabs button {
     flex: 1; padding: 9px 0; border: none; background: none; font-size: 14px;
@@ -506,7 +512,10 @@
 <div id="colModal" class="modal">
   <div class="sheet">
     <div class="sheet-head">
-      <div style="font-size:15px;font-weight:600">合集「<span id="colName"></span>」</div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600">
+        <span style="color:var(--sub);font-weight:400">合集</span>
+        <input id="colNameInput" class="col-name-input" type="text" maxlength="50" placeholder="合集名称" autocomplete="off">
+      </div>
       <div class="p" id="colMeta">…</div>
     </div>
     <div class="sheet-body">
@@ -518,8 +527,7 @@
       <div id="colItems"></div>
     </div>
     <div class="sheet-foot">
-      <button id="btnColRename">修改名称</button>
-      <button id="btnColMode">切换为随机抽</button>
+      <button id="btnColMode">🔁 顺序播</button>
       <button id="btnColReset">重置进度</button>
       <button id="colCancel">放弃未确认选择</button>
       <button id="colClose" class="primary">确认并完成</button>
@@ -1230,7 +1238,7 @@ function renderCollections() {
     const div = document.createElement('div');
     div.className = 'item';
     div.innerHTML = `<div class="t"><div class="name">📚 ${esc(c.name)}</div>
-      <div class="meta">${c.mode === 'random' ? '随机抽（不重复）' : '顺序播'} · 共 ${c.count} 集 · 播到第 ${c.cursor} 集</div></div>`;
+      <div class="meta">${c.mode === 'random' ? '🔀 随机抽（不重复）' : '🔁 顺序播'} · 共 ${c.count} 集 · 播到第 ${c.cursor} 集</div></div>`;
     const mk = (txt, title, fn, cls) => {
       const b = document.createElement('button');
       b.textContent = txt; b.title = title; if (cls) b.className = cls;
@@ -1250,7 +1258,9 @@ function renderCollections() {
 $('btnColNew').onclick = async () => {
   const r = await api('/collections', { method: 'POST', body: { name: '新合集' } });
   await refreshCollectionsOnly();
-  openColModal(r.collection.id);
+  await openColModal(r.collection.id);
+  const input = $('colNameInput');
+  input.focus(); input.select(); // 名字直接在上面改，无需再找改名按钮
 };
 
 $('btnColImport').onclick = async () => {
@@ -1284,9 +1294,11 @@ async function renderColModal() {
   const pendingLocalIds = collectionMediaPicker?.selectedIds();
   const r = await api('/collections/' + editingColId);
   const c = r.collection;
-  $('colName').textContent = c.name;
-  $('colMeta').textContent = `${c.mode === 'random' ? '随机抽（不重复）' : '顺序播'} · 共 ${c.items.length} 集 · 播到第 ${c.cursor} 集`;
-  $('btnColMode').textContent = c.mode === 'random' ? '切换为顺序播' : '切换为随机抽';
+  const nameInput = $('colNameInput');
+  if (document.activeElement !== nameInput) nameInput.value = c.name; // 重渲染不打断正在输入的名字
+  $('colMeta').textContent = `${c.mode === 'random' ? '🔀 随机抽（不重复）' : '🔁 顺序播'} · 共 ${c.items.length} 集 · 播到第 ${c.cursor} 集`;
+  $('btnColMode').textContent = c.mode === 'random' ? '🔀 随机抽（不重复）' : '🔁 顺序播';
+  $('btnColMode').title = c.mode === 'random' ? '当前为随机抽（不重复），点击切换为顺序播' : '当前为顺序播，点击切换为随机抽';
 
   const box = $('colItems');
   box.innerHTML = c.items.length ? '<div style="font-size:13px;color:var(--sub);margin:10px 0 6px">剧集列表</div>' : '<div class="empty">合集为空<br>从片库挑或贴链接加入剧集</div>';
@@ -1343,15 +1355,21 @@ $('btnColMode').onclick = async () => {
   await api(`/collections/${editingColId}/mode`, { method: 'POST', body: { mode: c?.mode === 'random' ? 'sequential' : 'random' } });
   await renderColModal(); await refreshCollectionsOnly();
 };
-$('btnColRename').onclick = async () => {
-  const c = collectionsList.find(x => x.id === editingColId);
-  const name = prompt('修改合集名称', c?.name || '新合集');
-  if (name === null) return;
-  if (!name.trim()) { alert('合集名称不能为空'); return; }
-  await api(`/collections/${editingColId}/rename`, { method: 'POST', body: { name: name.trim() } });
-  await refreshCollectionsOnly();
-  await renderColModal();
-};
+// 名字就地编辑：失焦或回车时提交（change 事件），无需改名按钮
+$('colNameInput').addEventListener('change', async () => {
+  const input = $('colNameInput');
+  const name = input.value.trim().slice(0, 50);
+  const current = collectionsList.find(x => x.id === editingColId);
+  if (!name) { input.value = current?.name || ''; return; }
+  if (current && name === current.name) return;
+  try {
+    await api(`/collections/${editingColId}/rename`, { method: 'POST', body: { name } });
+    await refreshCollectionsOnly();
+  } catch (e) {
+    alert('改名失败：' + e.message);
+    if (current) input.value = current.name;
+  }
+});
 $('btnColReset').onclick = async () => {
   if (!confirm('重置进度：下次从第一集重新开始？')) return;
   await api(`/collections/${editingColId}/reset`, { method: 'POST' });

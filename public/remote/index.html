@@ -64,7 +64,12 @@
     padding: 7px 12px; font-size: 13px; border: 1px solid var(--line);
     border-radius: 8px; background: var(--card); color: var(--text); cursor: pointer;
   }
-  .maint .actions { display: flex; gap: 6px; }
+  .maint .actions { display: flex; gap: 6px; align-items: center; }
+  .maint .actions label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer; }
+  .maint .actions select {
+    padding: 6px 8px; font-size: 13px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); color: var(--text); max-width: 130px;
+  }
   .settings-input {
     width: 100%; padding: 12px; margin-bottom: 10px; font-size: 15px;
     border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text);
@@ -326,7 +331,7 @@
       <div class="maint" id="frontendRow">
         <span id="frontendLabel">播放前端</span>
         <div class="actions">
-          <select id="frontendSelect" style="max-width:130px"><option value="chrome">Chrome kiosk</option><option value="mpv">mpv 本地播放器</option></select>
+          <select id="frontendSelect"><option value="chrome">Chrome kiosk</option><option value="mpv">mpv 本地播放器</option></select>
           <label title="自动拉起：崩溃自动重拉、重启自动开播；关闭后保持关闭，可手动打开"><input type="checkbox" id="frontendWatchdog">自动拉起</label>
           <button id="btnFrontendPower">打开</button>
         </div>

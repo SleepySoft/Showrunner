@@ -24,6 +24,8 @@ function buildDevConfig(rootDir, env = process.env) {
 
   const explicitPassword = env.SHOWRUNNER_DEV_PASSWORD || null;
   const savedHash = Number(saved.passwordSetupVersion || 0) >= 1 ? saved.passwordHash || null : null;
+  // 切换前端会写回 configFile；重启后同样从这里恢复（校验非法值）
+  const savedFrontend = saved.playerFrontend === 'mpv' ? 'mpv' : 'chrome';
   const port = Number(env.SHOWRUNNER_DEV_PORT || 7101);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SHOWRUNNER_DEV_PORT 必须是 1-65535 的端口');
 
@@ -50,6 +52,7 @@ function buildDevConfig(rootDir, env = process.env) {
     playbackIssueLog: useProductionData ? path.join(productionDir, 'logs', 'playback-events.log') : path.join(devDir, 'playback-events.log'),
     useProductionData,
     disableCache: !enabled(env.SHOWRUNNER_DEV_CACHE),
+    playerFrontend: savedFrontend,
     manageBrowser: true,      // 允许按需托管浏览器进程（手动打开 chrome 前端时）
     kioskBrowser: false,      // 开发模式绝不用 kiosk 全屏，一律窗口化
     frontendWatchdog: false,  // 不自动拉起前端；在遥控器里手动打开/关闭或开启自动拉起

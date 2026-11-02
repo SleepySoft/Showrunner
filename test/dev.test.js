@@ -51,6 +51,12 @@ test('开发配置隔离正式数据、浏览器、缓存和系统开机启动',
 
     fs.mkdirSync(path.join(root, '.dev'), { recursive: true });
     const hash = Auth.hashPassword('changed-dev-password');
+    // 播放前端切换会写回 configFile；buildDevConfig 必须读回来，重启后保持选择
+    fs.writeFileSync(path.join(root, '.dev', 'config.json'), JSON.stringify({ playerFrontend: 'mpv' }));
+    assert.equal(buildDevConfig(root, {}).playerFrontend, 'mpv');
+    fs.writeFileSync(path.join(root, '.dev', 'config.json'), JSON.stringify({ playerFrontend: 'bogus' }));
+    assert.equal(buildDevConfig(root, {}).playerFrontend, 'chrome');
+
     fs.writeFileSync(path.join(root, '.dev', 'config.json'), JSON.stringify({ passwordHash: hash, passwordSetupVersion: 1 }));
     const restarted = buildDevConfig(root, {});
     assert.equal(restarted.password, null);

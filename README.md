@@ -56,7 +56,7 @@ npm install
 npm start
 ```
 
-> **两种分发方式**：开发者 `git clone`（纯代码，无二进制）→ `scripts\install.bat` 自动补齐环境；用户直接用打包好的 `showrunner-portable-*.zip`（含便携 Node + 全部工具），解压双击 `start.bat` 即用。打新包：`scripts\package.bat`（含自启动验证）。详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+> **两种分发方式**：开发者 `git clone`（纯代码，无二进制）→ `scripts\install.bat` 自动补齐环境；用户直接用打包好的 `showrunner-portable-*.zip`（含便携 Node + 全部工具），解压双击 `start.bat` 即用，停止整个服务双击 `scripts\stop.bat`。打新包：`scripts\package.bat`（含自启动验证）。详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 开发调试不要运行 kiosk：使用 `npm run dev` 启动隔离环境，然后在普通 Chrome 中打开 `http://127.0.0.1:7101/remote/` 和 `/tv/`，默认密码为 `showrunner-dev`。调试数据全部位于 `.dev/`，不会污染正式频道和资产；需要真实频道数据调试时，在 `.dev/config.json` 设 `"useProductionData": true`（会读写正式数据，勿与正式实例同开）。播放前端一律窗口化（无 kiosk），在遥控器「播放前端」里手动打开/关闭。断点、环境变量与 DevTools 用法见 [调试指南](docs/DEBUGGING.md)。
 

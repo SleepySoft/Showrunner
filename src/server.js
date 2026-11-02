@@ -539,6 +539,18 @@ function createApp(cfg) {
 async function start(cfg) {
   if (cfg.storageMigration?.required) return startStorageGate(cfg);
   const { app, queue, library, playlists, collections, scheduler, frontendSupervisor, auth, setup, store, cache, compatibility, updater, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState } = createApp(cfg);
+  // PID 文件供 scripts\stop.ps1 精确停止整个服务；多实例同进程（测试）时各删各的
+  const pidFile = cfg.pidFile || path.join(cfg.dataDir || path.dirname(cfg.dataFile), 'run', 'showrunner.pid');
+  const removePidFile = () => {
+    try {
+      if (fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() === String(process.pid)) fs.unlinkSync(pidFile);
+    } catch {}
+  };
+  try {
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, String(process.pid), 'utf8');
+    process.once('exit', removePidFile);
+  } catch {}
   const server = http.createServer(app);
   const ws = setupWs(server, {
     auth, queue, getState: getTvState,
@@ -596,7 +608,7 @@ async function start(cfg) {
   return {
     server, app, queue, library, playlists, collections, scheduler, frontendSupervisor, browserctl: frontendSupervisor, auth, store, cache, compatibility, ws, updater, playbackIssues,
     applySchedulerTick, applyChannelTimingTick, selectChannel, playOnDemand, getTvState,
-    port: addr.port, host: addr.address,
+    port: addr.port, host: addr.address, pidFile,
     close: async () => {
       if (schedTimer) clearInterval(schedTimer);
       if (channelTimer) clearInterval(channelTimer);
@@ -605,6 +617,7 @@ async function start(cfg) {
       for (const s of sockets) s.destroy();
       ws.wss.close();
       await new Promise(resolve => server.close(() => resolve()));
+      removePidFile();
     }
   };
 }

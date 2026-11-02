@@ -243,6 +243,26 @@ test('POST /api/playback/normalize 切换音量均衡并持久化到 config.json
   assert.equal((await fetch(base + '/api/playback/normalize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) })).status, 401);
 });
 
+test('服务启动写 PID 文件（stop.ps1 定位用），close 后删除', async () => {
+  assert.ok(fs.existsSync(srv.pidFile), '共享实例应已写 PID 文件');
+  assert.equal(fs.readFileSync(srv.pidFile, 'utf8').trim(), String(process.pid));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-pidfile-'));
+  let app;
+  try {
+    app = await start({
+      rootDir: path.join(__dirname, '..'), host: '127.0.0.1', port: 0, password: 'pw',
+      dataFile: path.join(dir, 'data.json'), cacheDir: path.join(dir, 'cache'), disableCache: true,
+      manageBrowser: false
+    });
+    assert.ok(fs.existsSync(app.pidFile));
+    await app.close();
+    assert.ok(!fs.existsSync(app.pidFile), 'close 后 PID 文件应删除');
+  } finally {
+    if (app) await app.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('POST /api/mode 切换模式', async () => {
   const s = await (await authed('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'maintenance' }) })).json();
   assert.equal(s.mode, 'maintenance');

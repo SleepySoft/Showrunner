@@ -18,7 +18,7 @@ const { isDirectPrivateRequest } = require('../password-recovery');
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
+function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, frontendSupervisor, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist, applySchedulerTick }) {
   const router = express.Router();
   router.use(express.json({ limit: '10mb' }));
 
@@ -785,11 +785,19 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
   // ---- 维护模式（kiosk 托管）----
 
   router.get('/mode', (req, res) => {
-    res.json(browserctl.status());
+    res.json(frontendSupervisor.status());
+  });
+
+  router.get('/playback/frontend', (req, res) => res.json(frontendSupervisor.status()));
+
+  router.put('/playback/frontend', async (req, res) => {
+    const result = await frontendSupervisor.setFrontend(String(req.body?.type || ''));
+    if (!result.ok) return res.status(result.error?.includes('未注册') ? 400 : 409).json(result);
+    res.json(result.status);
   });
 
   router.post('/mode', async (req, res) => {
-    const s = await browserctl.setMode(String(req.body?.mode));
+    const s = await frontendSupervisor.setMode(String(req.body?.mode));
     if (!s) return res.status(400).json({ error: 'mode 只能是 normal、maintenance 或 offline' });
     res.json(s);
   });

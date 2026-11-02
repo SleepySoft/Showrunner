@@ -323,6 +323,10 @@
         <span id="maintLabel">电视：锁定播放</span>
         <div class="actions"><button id="btnMaint">进入维护模式</button><button id="btnOffline">下线</button></div>
       </div>
+      <div class="maint" id="frontendRow">
+        <span id="frontendLabel">播放前端</span>
+        <select id="frontendSelect" style="max-width:150px"><option value="chrome">Chrome kiosk</option><option value="mpv">mpv 本地播放器</option></select>
+      </div>
       <div class="maint" id="autostartRow">
         <span id="autostartLabel">开机启动：检查中…</span>
         <button id="btnAutostart">配置</button>
@@ -683,6 +687,10 @@ async function refreshMode() {
 }
 function renderMode() {
   if (!modeStatus) return;
+  $('frontendSelect').value = modeStatus.frontend || 'chrome';
+  const player = modeStatus.player || {};
+  $('frontendLabel').textContent = `播放前端：${modeStatus.frontend === 'mpv' ? 'mpv' : 'Chrome'}${player.lastError ? '（异常）' : ''}`;
+  $('frontendSelect').title = player.lastError || '';
   const row = $('maintRow');
   if (!modeStatus.manageBrowser) { row.style.display = 'none'; return; }
   row.style.display = '';
@@ -701,7 +709,9 @@ function renderMode() {
     $('maintLabel').textContent = `🔧 维护模式 · 约 ${leftMin} 分钟后自动回锁`;
     $('btnMaint').textContent = '立即回锁';
   } else {
-    $('maintLabel').textContent = modeStatus.kioskRunning ? '电视：锁定播放（kiosk 运行中）' : '电视：锁定播放';
+    $('maintLabel').textContent = modeStatus.playerRunning
+      ? `电视：锁定播放（${modeStatus.frontend === 'mpv' ? 'mpv' : 'kiosk'} 运行中）`
+      : '电视：锁定播放';
     $('btnMaint').textContent = '进入维护模式';
   }
 }
@@ -710,6 +720,20 @@ $('btnMaint').onclick = async () => {
   if (target === 'maintenance' && !confirm('进入维护模式：电视的锁定画面会关闭，并打开一个普通浏览器窗口。\n约 10 分钟无操作自动回锁。继续？')) return;
   modeStatus = await api('/mode', { method: 'POST', body: { mode: target } });
   renderMode();
+};
+$('frontendSelect').onchange = async () => {
+  const type = $('frontendSelect').value;
+  if (!confirm(`切换为 ${type === 'mpv' ? 'mpv 本地播放器' : 'Chrome kiosk'}？当前播放窗口会重启。`)) {
+    $('frontendSelect').value = modeStatus?.frontend || 'chrome'; return;
+  }
+  $('frontendSelect').disabled = true;
+  try {
+    modeStatus = await api('/playback/frontend', { method: 'PUT', body: { type } });
+    renderMode();
+  } catch (error) {
+    alert('切换失败：' + error.message);
+    await refreshMode();
+  } finally { $('frontendSelect').disabled = false; }
 };
 $('btnOffline').onclick = async () => {
   const offline = modeStatus?.mode === 'offline';

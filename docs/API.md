@@ -415,7 +415,7 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 ### `GET /api/mode`
 
 ```json
-{ "mode": "normal", "manageBrowser": true, "kioskRunning": true, "maintenanceBrowserRunning": false, "managedBrowserRunning": true, "maintenanceUntil": null, "browserFound": true }
+{ "mode": "normal", "manageFrontend": true, "frontend": "mpv", "playerRunning": true, "kioskRunning": false, "player": { "type": "mpv", "available": true, "running": true, "ipcConnected": true, "currentQid": "...", "lastError": null }, "frontends": { "chrome": {}, "mpv": {} } }
 ```
 
 ### `POST /api/mode`
@@ -424,11 +424,16 @@ Markdown 节目表下载（`Content-Disposition: attachment`）：时刻表表�
 // 请求 { "mode": "maintenance" }   // 或 "normal" / "offline"
 ```
 
-- `maintenance`：等待 kiosk 进程树退出，再启动一个受控的非 kiosk 维护窗口；`maintenanceUntil` 到期（默认 10 分钟）或手动回锁时，先关闭维护窗口再拉起唯一 kiosk。
-- `offline`：杀掉 kiosk 且看门狗不再重拉；状态持久化，直到遥控器切回 `normal`，用于长期释放电脑。
+- `maintenance`：等待当前 Chrome/mpv 播放前端退出，再启动一个受控的非 kiosk 维护窗口；到期或手动回锁时先关闭维护窗口，再恢复所选前端。
+- `offline`：停止播放前端且看门狗不再重拉；状态持久化，直到遥控器切回 `normal`。
 - 非法 mode 返回 400。`manageBrowser: false` 时模式仍记录但不操作浏览器进程。
 - 模式变更通过 WebSocket 推送 `{ "type": "mode", "data": { /* 同 GET /api/mode */ } }`。
 - 所有模式切换串行处理；Showrunner 管理的浏览器任意时刻最多一个。服务启动时会清理带专用 profile 标记的遗留实例，不影响用户自己的浏览器。
+
+## 播放前端
+
+- `GET /api/playback/frontend`：返回与 `/api/mode` 相同的前端、可用性、进程和 IPC 状态，不包含绝对媒体路径。
+- `PUT /api/playback/frontend`，请求 `{ "type": "chrome" }` 或 `{ "type": "mpv" }`：串行停止旧前端并启动新前端。成功后保存机器级配置；未注册类型返回 400，启动失败返回 409 并恢复旧前端。
 
 ## 开机启动
 

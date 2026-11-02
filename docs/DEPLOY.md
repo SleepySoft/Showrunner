@@ -57,6 +57,7 @@
    - 尝试放行防火墙 TCP 7100（需管理员；失败会打印手动步骤）
 3. 双击 `start.bat` 启动。电视会显示一次性配对码和手机地址；用手机打开该地址并设置长期密码（哈希保存在同级 `showrunner-data\config.json`）
 4. （可选）双击 `scripts\autostart-on.bat` 注册开机自启——登录后无窗口后台运行
+5. （可选）要使用 mpv 直放 NAS/MKV/HEVC：安装 mpv，将 `mpv.exe` 放到 `bin\`、加入 PATH，或在同级数据目录 `config.json` 配置 `mpvPath`；然后在手机“正在播放”页切换前端
 
 ## 路线 C：手动逐条（脚本不可用时）
 
@@ -75,6 +76,8 @@ node src\server.js
 ```
 
 yt-dlp / ffmpeg 已在 `bin\` 里；若丢失，重新运行 `install.bat` 会自动补齐。
+
+mpv 当前不由安装脚本下载，以避免未核定的发布源、许可和包体积策略。Chrome 仍是默认前端；用户安装 mpv 后可通过遥控器切换。
 
 ## 部署后检查清单
 

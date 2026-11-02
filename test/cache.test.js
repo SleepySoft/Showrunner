@@ -196,6 +196,9 @@ test('索引持久化：重启后 ready 条目仍在，中断的下载降级为 
   const half = cache2.get('deadbeef0000');
   assert.equal(half.status, 'failed');
   assert.match(half.error, /重启/);
+
+  cache2.entries.set('escaped-file', { key: 'escaped-file', status: 'ready', file: '../outside.mp4' });
+  assert.equal(cache2.resolveFile('escaped-file'), null, '损坏索引不能把 mpv 引到缓存目录外');
 });
 
 // ---------- 装饰与流端点 ----------

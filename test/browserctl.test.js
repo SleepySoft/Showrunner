@@ -211,3 +211,14 @@ test('POST /api/mode 非法模式 400 + 未登录 401', async () => {
   assert.equal((await authed('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'x' }) })).status, 400);
   assert.equal((await fetch(base + '/api/mode')).status, 401);
 });
+
+test('播放前端 API 返回状态并拒绝未注册类型', async () => {
+  const status = await (await authed('/api/playback/frontend')).json();
+  assert.equal(status.frontend, 'chrome');
+  assert.ok(status.frontends.chrome);
+  assert.ok(status.frontends.mpv);
+  assert.equal((await authed('/api/playback/frontend', {
+    method: 'PUT', body: JSON.stringify({ type: 'unknown-player' })
+  })).status, 400);
+  assert.equal((await fetch(base + '/api/playback/frontend')).status, 401);
+});

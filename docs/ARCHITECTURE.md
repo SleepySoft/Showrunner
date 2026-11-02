@@ -68,6 +68,12 @@
 
 电视端只拿到 `getPublicState()`：当前片 + 状态 + 最多 3 部"即将播出"——**永远拿不到队列全文**。
 
+#### 可插拔播放前端
+
+`src/playback/` 把播出核心与画面输出分开：`PlaybackFrontend` 定义 `start/stop/load/play/pause/seek/setVolume/showStandby/showMenu/status` 及客观事件；`PlayableSourceResolver` 只把片库登记文件和 ready 缓存转换为受信任来源；`ChromeFrontend` 保留网页电视端；`MpvFrontend` 通过 JSON IPC 控制全屏 mpv。`FrontendSupervisor` 串行管理前端切换、维护浏览器、下线和意外退出重拉。
+
+前端不推进队列。它回报的 `position/ended/error/input` 都回到服务端，并按当前 `qid` 校验后才作用于 `QueueManager`。mpv 仅接受 resolver 产生的绝对路径，遥控器和 API 不能提交任意本地路径。机器选择保存在 `config.json` 的 `playerFrontend`，不进入可分享资产。详见 [ADR-0014](adr/0014-selectable-playback-frontends.md)。
+
 ### 2. 信任边界
 
 | 端 | 能做什么 | 依据 |
@@ -113,7 +119,7 @@
 
 1. **本地文件** —— 完全可控（已实现）
 2. **预下载缓存** —— 编排后服务端用 yt-dlp 提前下载成本地文件，播放体验等同第 1 级：零广告、零卡顿、零网页逻辑（已实现，见下）
-3. **实时流** —— yt-dlp 解析流地址交 mpv 播放，无网页但受网络影响（未做，预下载已覆盖大多数场景）
+3. **mpv 直放** —— 本地/NAS 原文件和已完成的网站缓存直接交给 mpv 解码（已实现）；不把远程临时 URL 直接交给 mpv
 4. **kiosk Chrome 兜底** —— 仅 DRM 站点（优酷部分会员内容）。三重约束：
    - 导航看门狗：CDP 监听 URL，被推荐劫持立即拉回
    - 净化注入：隐藏推荐/评论/弹幕，锁死页面交互，监听 ended
@@ -195,9 +201,9 @@
 
 本地媒体若明确报格式不支持或解码失败，不立即套用跳过策略：电视端改发 `compatibilityRequest`，服务端按需用 FFmpeg 生成 H.264/AAC MP4 到 `cache/compatible/`，完成后自动重播当前节目。原文件不变，转换结果按源文件签名复用并受独立容量上限约束。遥控器“日志”页通过鉴权 API 查看最近结构化播放事件与转换状态；不暴露绝对媒体路径。见 [ADR-0011](adr/0011-local-media-compatibility-fallback.md)。
 
-### 9. 可选播放前端（已接受，待实现）
+### 9. 可选播放前端（第一阶段已实现）
 
-播出核心将与电视画面实现解耦：旧部署默认继续使用 Chrome kiosk，可选 mpv 直接播放本地/NAS 原文件和 yt-dlp 已就绪缓存。频道、合集、调度、异常策略与遥控器仍只有一份服务器权威状态；播放前端只执行命令和回报客观事件。`playerFrontend` 与可执行文件路径属于本机配置，不进入频道/合集资产。详细契约、源解析、单实例托管、维护模式、OSD/遥控器和实施顺序见 [ADR-0014](adr/0014-selectable-playback-frontends.md)。
+播出核心已与电视画面实现解耦：旧部署默认继续使用 Chrome kiosk，可选 mpv 直接播放本地/NAS 原文件和 yt-dlp 已就绪缓存。频道、合集、调度、异常策略与遥控器仍只有一份服务器权威状态；播放前端只执行命令和回报客观事件。`playerFrontend` 与可执行文件路径属于本机配置，不进入频道/合集资产。第一阶段包含统一契约、源解析、单实例托管、维护/下线、JSON IPC 和最小 OSD 菜单；自动降级、屏幕选择和真机矩阵仍待后续。详细边界见 [ADR-0014](adr/0014-selectable-playback-frontends.md)。
 
 ## ADR：关键取舍
 

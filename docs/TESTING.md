@@ -13,7 +13,7 @@
 npm test
 ```
 
-测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 184 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器托管通过注入假 spawn/exec 测试，不启动真实浏览器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
+测试全部使用 Node 内置 `node:test`，无额外测试依赖；当前基线为 189 个，用例数量以 `npm test` 输出为准。测试运行在临时目录和随机端口，不碰真实数据；网页标题解析通过注入假 fetch 测试，不触外网；浏览器与 mpv 托管通过注入假进程/IPC 测试，不启动真实播放器；缓存下载通过注入假 fetchInfo/download 实现测试，不起真实 yt-dlp 进程；时刻表 tick 通过注入时钟测试（`disableScheduler: true` 关闭 15 秒自动对齐）。所有集成测试传入 `disableCache: true` + 临时 `cacheDir`，避免触发真实下载、避免污染项目目录。
 
 `test/dev.test.js` 断言开发入口只绑定 loopback，数据与资产落在 `.dev/`，不托管浏览器、不操作开机启动、默认关闭真实缓存，并验证环境变量覆盖与调试密码持久化。
 
@@ -45,9 +45,13 @@ npm test
 
 站点后缀剥离（B 站/优酷/YouTube/无后缀）、HTML 实体解码、网络失败与非 200 与无 `<title>` 的「主机+路径」退化、非法 URL 不抛异常。全部注入假 fetch，不触外网。
 
-### 单元：浏览器托管 + 集成：维护模式（`test/browserctl.test.js`，12 个）
+### 单元：浏览器托管 + 集成：维护模式（`test/browserctl.test.js`，13 个）
 
-启动清理遗留受控实例后拉起 kiosk、kiosk 退出看门狗重拉、维护模式先关 kiosk 再开受控普通窗口、超时/手动回锁先关维护窗口再拉唯一 kiosk、旧进程迟到退出不污染新实例、下线释放全部受控浏览器、非法模式拒绝、`manage=false` 零副作用；集成：`GET/POST /api/mode` 切换、非法 400、未登录 401。
+启动清理遗留受控实例后拉起 kiosk、kiosk 退出看门狗重拉、维护模式先关 kiosk 再开受控普通窗口、超时/手动回锁先关维护窗口再拉唯一 kiosk、旧进程迟到退出不污染新实例、下线释放全部受控浏览器、非法模式拒绝、`manage=false` 零副作用；集成：`GET/POST /api/mode` 切换，以及播放前端状态、未注册类型和鉴权。
+
+### 单元：可插拔播放前端（`test/playback-frontends.test.js`，4 个）
+
+覆盖片库/ready 缓存的受信任源解析与缺失/下载中状态；mpv 受控启动参数、绝对路径门禁、JSON IPC 进度/结束/按键事件；前端切换的停旧启新、失败回滚且不保存配置；权威播放状态同步及进入维护模式时回收 mpv。所有测试使用假进程和假 named pipe，不要求本机安装 mpv。
 
 ### 单元 + 端到端：节目单（`test/playlists.test.js`，18 个）
 

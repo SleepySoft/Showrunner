@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const os = require('os');
 const express = require('express');
 
-const { loadConfig, savePasswordHash } = require('./config');
+const { loadConfig, savePasswordHash, saveConfigPatch } = require('./config');
 const { Store } = require('./store');
 const { AssetVault } = require('./assets');
 const { Library } = require('./library');
@@ -18,6 +18,10 @@ const { PlaylistManager } = require('./playlists');
 const { CollectionManager } = require('./collections');
 const { Scheduler } = require('./scheduler');
 const { BrowserController } = require('./browserctl');
+const { PlayableSourceResolver } = require('./playback/source-resolver');
+const { ChromeFrontend } = require('./playback/chrome');
+const { MpvFrontend, findMpv } = require('./playback/mpv');
+const { FrontendSupervisor } = require('./playback/supervisor');
 const { Auth } = require('./auth');
 const { apiRouter } = require('./routes/api');
 const { mediaRouter, cacheRouter, compatibilityRouter } = require('./routes/media');
@@ -124,14 +128,6 @@ function createApp(cfg) {
     return { ...r.item, episode: r.episode, total: r.total };
   };
 
-  // kiosk 浏览器托管：默认仅真实启动时开启（cfg.manageBrowser），测试默认关闭
-  const browserctl = new BrowserController({
-    tvUrl: `http://localhost:${cfg.port}/tv/`,
-    chromePath: cfg.chromePath,
-    manage: !!cfg.manageBrowser,
-    initialMode: persisted.settings?.offline ? 'offline' : 'normal'
-  });
-
   // 网页片源缓存：yt-dlp 预下载，播出队列变化时自动预取当前 + 后 2 个
   // cfg.disableCache 供测试使用：不找 yt-dlp、不挂预取钩子
   const ytdlp = cfg.disableCache ? null : findYtdlp(cfg.ytdlpPath, cfg.rootDir);
@@ -151,6 +147,31 @@ function createApp(cfg) {
   queue.decorator = item => ({
     ...cache.decorate(item),
     ...compatibility.decorate(item, item?.mediaId ? library.get(item.mediaId) : null)
+  });
+
+  // 播放前端：Chrome 与 mpv 共用队列权威状态、受信任源解析和维护/下线生命周期。
+  const selectedFrontend = cfg.playerFrontend === 'mpv' ? 'mpv' : 'chrome';
+  const initialMode = persisted.settings?.offline ? 'offline' : 'normal';
+  const browserProcess = new BrowserController({
+    tvUrl: `http://localhost:${cfg.port}/tv/`,
+    chromePath: cfg.chromePath,
+    manage: !!cfg.manageBrowser,
+    initialMode: selectedFrontend === 'chrome' && initialMode === 'normal' ? 'normal' : 'offline'
+  });
+  const resolver = new PlayableSourceResolver({ library, cache });
+  const chromeFrontend = new ChromeFrontend(browserProcess);
+  const mpvFrontend = cfg.mpvFrontend || new MpvFrontend({
+    mpvPath: findMpv(cfg.mpvPath, cfg.rootDir), rootDir: cfg.rootDir,
+    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf
+  });
+  const frontendSupervisor = cfg.frontendSupervisor || new FrontendSupervisor({
+    browser: browserProcess,
+    frontends: { chrome: chromeFrontend, mpv: mpvFrontend },
+    selected: selectedFrontend,
+    resolver,
+    manage: !!cfg.manageBrowser,
+    initialMode,
+    onSelectionChange: type => saveConfigPatch(cfg.configFile || path.join(cfg.rootDir, 'config.json'), { playerFrontend: type })
   });
   const siteCollectionImporter = cfg.siteCollectionImporter || (async url => {
     if (!ytdlp) return { ok: false, error: '未找到 yt-dlp，无法解析网站合集' };
@@ -178,7 +199,7 @@ function createApp(cfg) {
     ...collections.serialize(),
     currentIndex: queue.currentIndex,
     playback: queue.playback,
-    settings: { mediaDirs: library.mediaDirs, schedules: scheduler.serialize(), offline: browserctl.mode === 'offline' }
+    settings: { mediaDirs: library.mediaDirs, schedules: scheduler.serialize(), offline: frontendSupervisor.mode === 'offline' }
   });
   const persist = () => {
     try {
@@ -190,7 +211,7 @@ function createApp(cfg) {
   queue.on('change', persist);
   playlists.on('change', persist);
   collections.on('change', persist);
-  browserctl.on('change', persist);
+  frontendSupervisor.on('change', persist);
   const onDirsChange = () => persist();
   // 首次启动建立独立镜像；从保险库恢复时也立即补回实时数据文件。
   try {
@@ -341,6 +362,69 @@ function createApp(cfg) {
     return { ...queue.getPublicState(), channels: playlists.tvList(), selectedChannelId: playlists.activeId };
   }
 
+  let frontendMenu = null;
+  const frontendMenuModel = () => {
+    if (!frontendMenu) return null;
+    if (frontendMenu.level === 'programs') {
+      const channel = playlists.get(frontendMenu.channelId);
+      const items = channel?.items || [];
+      frontendMenu.index = Math.max(0, Math.min(frontendMenu.index, Math.max(0, items.length - 1)));
+      return { title: `点播 · ${channel?.name || ''}`, index: frontendMenu.index, items: items.map(item => ({ label: item.title })) };
+    }
+    const channels = playlists.tvList();
+    frontendMenu.index = Math.max(0, Math.min(frontendMenu.index, Math.max(0, channels.length - 1)));
+    return { title: '切换频道', index: frontendMenu.index, items: channels.map(channel => ({ label: channel.name })) };
+  };
+  const showFrontendMenu = () => frontendSupervisor.showMenu(frontendMenuModel());
+  function handleFrontendInput(action) {
+    if (!['up', 'down', 'confirm', 'menu'].includes(action)) return false;
+    if (action === 'menu') {
+      if (frontendMenu?.level === 'programs') frontendMenu = { level: 'channels', index: 0 };
+      else if (frontendMenu) frontendMenu = null;
+      else frontendMenu = { level: 'channels', index: Math.max(0, playlists.tvList().findIndex(c => c.id === playlists.activeId)) };
+      if (frontendMenu) showFrontendMenu();
+      else frontendSupervisor.sync(getTvState());
+      return true;
+    }
+    if (!frontendMenu) return false;
+    const model = frontendMenuModel();
+    if (!model?.items.length) return false;
+    if (action === 'up' || action === 'down') {
+      const delta = action === 'up' ? -1 : 1;
+      frontendMenu.index = (frontendMenu.index + delta + model.items.length) % model.items.length;
+      showFrontendMenu();
+      return true;
+    }
+    if (frontendMenu.level === 'channels') {
+      const channel = playlists.tvList()[frontendMenu.index];
+      if (!channel) return false;
+      if (channel.id === playlists.activeId && channel.allowOnDemand && channel.items?.length) {
+        frontendMenu = { level: 'programs', channelId: channel.id, index: 0 };
+        showFrontendMenu();
+      } else {
+        selectChannel(channel.id, { tv: true, play: true });
+        frontendMenu = null;
+      }
+    } else {
+      const channel = playlists.get(frontendMenu.channelId);
+      const item = channel?.items?.[frontendMenu.index];
+      if (channel && channel.id !== playlists.activeId) selectChannel(channel.id, { tv: true, play: false });
+      if (item) playOnDemand(item.qid);
+      frontendMenu = null;
+    }
+    return true;
+  }
+
+  frontendSupervisor.on('position', event => {
+    if (event.qid === queue.current()?.qid) queue.reportPosition(event.position, event.duration);
+  });
+  frontendSupervisor.on('ended', event => {
+    if (!event.qid || event.qid === queue.current()?.qid) handleChannelEnded();
+  });
+  frontendSupervisor.on('playbackError', handlePlaybackIssue);
+  frontendSupervisor.on('input', handleFrontendInput);
+  queue.on('change', () => frontendSupervisor.sync(getTvState()));
+
   /** 切到某节目单并开播（时刻表跃迁用） */
   const switchToPlaylist = (playlistId, loop) => {
     const p = playlists.get(playlistId);
@@ -408,16 +492,16 @@ function createApp(cfg) {
   // 遥控器：静态页 + API
   app.use('/remote', express.static(path.join(cfg.rootDir, 'public', 'remote')));
   const onPasswordChange = hash => savePasswordHash(cfg.configFile || path.join(cfg.rootDir, 'config.json'), hash);
-  app.use('/api', apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, browserctl, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
+  app.use('/api', apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, collections, scheduler, frontendSupervisor, cache, compatibility, playbackIssues, updater, autostart, siteCollectionImporter, selectChannel, applyChannelTimingTick, onPasswordChange, onDirsChange, onPersist: persist, applySchedulerTick }));
 
   app.get('/', (req, res) => res.redirect('/remote/'));
 
-  return { app, queue, library, playlists, collections, scheduler, browserctl, auth, setup, store, assetVault, cache, compatibility, updater, autostart, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState };
+  return { app, queue, library, playlists, collections, scheduler, frontendSupervisor, browserctl: frontendSupervisor, auth, setup, store, assetVault, cache, compatibility, updater, autostart, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, handleFrontendInput, playOnDemand, getTvState };
 }
 
 async function start(cfg) {
   if (cfg.storageMigration?.required) return startStorageGate(cfg);
-  const { app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, compatibility, updater, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState } = createApp(cfg);
+  const { app, queue, library, playlists, collections, scheduler, frontendSupervisor, auth, setup, store, cache, compatibility, updater, playbackIssues, applySchedulerTick, applyChannelTimingTick, selectChannel, handleChannelEnded, handlePlaybackIssue, handleCompatibilityRequest, playOnDemand, getTvState } = createApp(cfg);
   const server = http.createServer(app);
   const ws = setupWs(server, {
     auth, queue, getState: getTvState,
@@ -432,6 +516,7 @@ async function start(cfg) {
 
   // 缓存状态变化 / 下载进度 → 推送给电视与遥控器（进度已在 CacheManager 内节流）
   cache.on('change', () => ws.pushState());
+  cache.on('change', () => frontendSupervisor.sync(getTvState()));
   cache.on('progress', () => ws.pushState());
   compatibility.on('change', entry => {
     if (entry.status === 'failed') {
@@ -443,8 +528,8 @@ async function start(cfg) {
     ws.pushState();
   });
 
-  // kiosk 托管启动 + 模式变更广播
-  browserctl.on('change', s => ws.broadcast({ type: 'mode', data: s }));
+  // 播放前端托管启动 + 模式/前端变更广播
+  frontendSupervisor.on('change', s => ws.broadcast({ type: 'mode', data: s }));
 
   // 时刻表：每 15 秒检查一次窗口跃迁（测试可传 cfg.disableScheduler 关闭）
   const schedTimer = cfg.disableScheduler ? null : setInterval(() => applySchedulerTick(), 15000);
@@ -462,16 +547,23 @@ async function start(cfg) {
   await new Promise(resolve => server.listen(cfg.port, cfg.host, resolve));
   const addr = server.address();
   // 先成功占用服务端口，再清理/启动受控浏览器；避免重复服务实例争抢浏览器。
-  await browserctl.start();
+  await frontendSupervisor.start();
+  await frontendSupervisor.sync(getTvState());
+  if (setup.required && frontendSupervisor.status().frontend === 'mpv') {
+    await frontendSupervisor.showMenu({
+      title: 'Showrunner 首次设置', index: -1,
+      items: [{ label: `电视配对码：${setup.code}` }, { label: `手机访问本机 ${addr.port} 端口完成设置` }]
+    });
+  }
 
   return {
-    server, app, queue, library, playlists, collections, scheduler, browserctl, auth, store, cache, compatibility, ws, updater, playbackIssues,
+    server, app, queue, library, playlists, collections, scheduler, frontendSupervisor, browserctl: frontendSupervisor, auth, store, cache, compatibility, ws, updater, playbackIssues,
     applySchedulerTick, applyChannelTimingTick, selectChannel, playOnDemand, getTvState,
     port: addr.port, host: addr.address,
     close: async () => {
       if (schedTimer) clearInterval(schedTimer);
       if (channelTimer) clearInterval(channelTimer);
-      await browserctl.stop();
+      await frontendSupervisor.stop();
       for (const c of ws.wss.clients) c.terminate();
       for (const s of sockets) s.destroy();
       ws.wss.close();

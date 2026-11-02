@@ -246,7 +246,9 @@ class CacheManager extends EventEmitter {
   resolveFile(key) {
     const e = this.entries.get(key);
     if (!e || e.status !== 'ready' || !e.file) return null;
-    const abs = path.join(this.dir, e.file);
+    const root = path.resolve(this.dir);
+    const abs = path.resolve(root, e.file);
+    if (abs !== root && !abs.startsWith(root + path.sep)) return null;
     return fs.existsSync(abs) ? abs : null;
   }
 

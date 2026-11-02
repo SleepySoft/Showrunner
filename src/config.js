@@ -19,7 +19,9 @@ const DEFAULTS = {
   ytdlpPath: null,        // yt-dlp 可执行文件路径（默认自动查找 PATH / bin/）
   cookiesFromBrowser: null, // 网页片源下载时借用哪个浏览器的登录态，如 "chrome"、"edge"
   cacheMaxGB: 20,         // 网页片源缓存上限（GB），超出后按最久未用淘汰
-  compatibilityCacheMaxGB: 10 // 本地不兼容媒体转换缓存上限（GB）
+  compatibilityCacheMaxGB: 10, // 本地不兼容媒体转换缓存上限（GB）
+  playerFrontend: 'chrome', // chrome | mpv；旧安装保持 Chrome
+  mpvPath: null           // mpv 可执行文件路径（也会探测 PATH / bin/）
 };
 
 function defaultAssetVaultDir(dataDir) {
@@ -58,6 +60,7 @@ function loadConfig(rootDir, argv = process.argv, env = process.env) {
   }
 
   const cfg = Object.assign({}, DEFAULTS, fileCfg, cli);
+  if (!['chrome', 'mpv'].includes(cfg.playerFrontend)) cfg.playerFrontend = 'chrome';
   if (env.SHOWRUNNER_PASSWORD) cfg.password = env.SHOWRUNNER_PASSWORD;
   if (env.PORT) cfg.port = Number(env.PORT);
 
@@ -103,4 +106,15 @@ function savePasswordHash(cfgFile, passwordHash) {
   fs.renameSync(tmp, cfgFile);
 }
 
-module.exports = { loadConfig, parseArgs, DEFAULTS, savePasswordHash, defaultAssetVaultDir };
+/** 原子更新机器级配置，保留未知字段。 */
+function saveConfigPatch(cfgFile, patch) {
+  let data = {};
+  try { data = JSON.parse(fs.readFileSync(cfgFile, 'utf8').replace(/^﻿/, '')); } catch {}
+  Object.assign(data, patch);
+  fs.mkdirSync(path.dirname(cfgFile), { recursive: true });
+  const tmp = cfgFile + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, cfgFile);
+}
+
+module.exports = { loadConfig, parseArgs, DEFAULTS, savePasswordHash, saveConfigPatch, defaultAssetVaultDir };

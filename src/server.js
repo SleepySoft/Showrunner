@@ -4,6 +4,7 @@
  * 既可 `node src/server.js` 直接启动，也可被测试代码 require 后在临时端口启动。
  */
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
@@ -484,6 +485,19 @@ function createApp(cfg) {
   });
 
   // 播放端与媒体流：局域网专用，不鉴权
+  // 非托管（开发/调试）模式给电视页注入环境标记，页面据此解除 kiosk 专属的
+  // 锁定交互（隐藏光标、禁右键/双击），恢复普通浏览器的可操作性。
+  if (!cfg.manageBrowser) {
+    const tvIndexFile = path.join(cfg.rootDir, 'public', 'tv', 'index.html');
+    const serveTvIndex = (_req, res) => {
+      const html = fs.readFileSync(tvIndexFile, 'utf8').replace('</head>', '<script>window.__SHOWRUNNER_UNMANAGED__=true</script></head>');
+      res.setHeader('Cache-Control', 'no-store');
+      res.type('html').send(html);
+    };
+    app.get('/tv', serveTvIndex);
+    app.get('/tv/', serveTvIndex);
+    app.get('/tv/index.html', serveTvIndex);
+  }
   app.use('/tv', express.static(path.join(cfg.rootDir, 'public', 'tv')));
   app.use('/media', mediaRouter(library));
   app.use('/cache', cacheRouter(cache));

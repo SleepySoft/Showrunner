@@ -6,7 +6,16 @@
 <title>Showrunner 电视端</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+  body { cursor: none; }
+  body.interactive, body.dev { cursor: default; }
+  body.dev { background: #0b0d10; }
+  #devBadge {
+    position: fixed; left: 12px; top: 10px; z-index: 200; pointer-events: none;
+    padding: 4px 10px; border-radius: 6px; background: #8a6d00; color: #fff;
+    font: 12px/1.5 Consolas, monospace; letter-spacing: 1px; opacity: .85;
+  }
+  #devBadge[hidden] { display: none; }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; }
   #standby, #webnote {
     position: fixed; inset: 0; display: none;
@@ -80,6 +89,7 @@
 </div>
 <div id="channelControls"></div>
 <div id="vodPanel"><h2 id="vodTitle">选择节目</h2><div class="hint">方向键选择　左键 / Enter 确认　右键返回</div><div id="vodItems"></div><button id="vodClose">返回频道</button></div>
+<div id="devBadge" hidden>DEV · 非托管调试 · 右键/F12 可用</div>
 <script>
 'use strict';
 /*
@@ -122,12 +132,19 @@ async function refreshFirstSetup() {
 refreshFirstSetup();
 setInterval(refreshFirstSetup, 2000);
 
-// 浏览器右键菜单和双击全屏由 kiosk 接管；右键作为遥控器的菜单/返回键。
+// 服务端托管 kiosk 时接管浏览器右键菜单和双击全屏；右键作为遥控器的菜单/返回键。
+// 非托管（开发/调试）模式保持普通浏览器行为：不隐藏光标，也不拦截右键/双击。
+const unmanaged = window.__SHOWRUNNER_UNMANAGED__ === true;
+if (unmanaged) {
+  document.body.classList.add('dev');
+  $('devBadge').hidden = false;
+}
 window.addEventListener('contextmenu', e => {
+  if (unmanaged) return;
   e.preventDefault();
   if (!$('firstSetup').classList.contains('show')) remoteMenuKey();
 }, { capture: true });
-window.addEventListener('dblclick', e => e.preventDefault(), { capture: true });
+window.addEventListener('dblclick', e => { if (!unmanaged) e.preventDefault(); }, { capture: true });
 video.controls = false;
 video.disablePictureInPicture = true;
 

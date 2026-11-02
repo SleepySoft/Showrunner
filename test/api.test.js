@@ -351,6 +351,10 @@ test('电视端与遥控器页面可访问', async () => {
   assert.match(tvHtml, /reason: 'compatibility_failed'/);
   assert.doesNotMatch(tvHtml, /addEventListener\('mousemove'/);
   assert.match(tvHtml, /音量、电源等系统键不拦截/);
-  assert.equal((await fetch(base + '/remote/')).status, 200);
+  const remoteRes = await fetch(base + '/remote/');
+  assert.equal(remoteRes.status, 200);
+  const remoteHtml = await remoteRes.text();
+  assert.match(remoteHtml, /draftSelected \?\? options\.initialSelected/);
+  assert.match(remoteHtml, /initialSelected: c\.items[\s\S]*draftSelected: pendingLocalIds/);
   assert.equal((await fetch(base + '/')).status, 200); // 重定向跟随
 });

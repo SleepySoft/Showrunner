@@ -1051,8 +1051,9 @@ function buildMediaTree(items) {
 function renderMediaTree(container, items, options = {}) {
   container.innerHTML = '';
   const tree = buildMediaTree(items);
+  // 已提交基线与界面草稿必须分开：弹窗重绘（如改名）不能把草稿误当成已保存状态。
   const initial = new Set((options.initialSelected || []).map(String));
-  const selected = new Set(initial);
+  const selected = new Set((options.draftSelected ?? options.initialSelected ?? []).map(String));
   const dirChecks = [];
   const wrapper = document.createElement('div');
   wrapper.className = 'media-tree';
@@ -1275,7 +1276,8 @@ async function renderColModal() {
   const pick = $('colPickLocal');
   collectionMediaPicker = renderMediaTree(pick, lib.items, {
     selectable: true,
-    initialSelected: pendingLocalIds || c.items.filter(item => item.type === 'local').map(item => item.mediaId),
+    initialSelected: c.items.filter(item => item.type === 'local').map(item => item.mediaId),
+    draftSelected: pendingLocalIds,
     emptyText: '片库为空',
     onCommit: ids => api(`/collections/${c.id}/local-items`, { method: 'PUT', body: { mediaIds: ids } }),
     onSelectionChange: (count, changed) => {

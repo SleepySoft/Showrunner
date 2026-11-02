@@ -14,7 +14,9 @@ test('开发配置隔离正式数据、浏览器、缓存和系统开机启动',
     assert.equal(base.host, '127.0.0.1');
     assert.equal(base.port, 7101);
     assert.equal(base.password, 'showrunner-dev');
-    assert.equal(base.manageBrowser, false);
+    assert.equal(base.manageBrowser, true);      // 允许按需托管浏览器进程
+    assert.equal(base.kioskBrowser, false);      // 但绝不用 kiosk 全屏
+    assert.equal(base.frontendWatchdog, false);  // 不自动拉起前端，遥控器里手动打开/关闭
     assert.equal(base.disableCache, true);
     assert.ok(base.dataFile.startsWith(path.join(root, '.dev')));
     assert.ok(base.assetVaultDir.startsWith(path.join(root, '.dev')));
@@ -29,15 +31,8 @@ test('开发配置隔离正式数据、浏览器、缓存和系统开机启动',
     assert.equal(configured.disableCache, false);
     assert.equal(configured.mediaDirs.length, 2);
 
-    // 默认不拉起任何播放前端；SHOWRUNNER_DEV_MPV=1 时仅窗口化拉起 mpv（非全屏、不碰 Chrome）
-    assert.equal(base.manageFrontend, false);
-    assert.equal(base.playerFrontend, 'chrome');
-    assert.equal(base.mpvWindowed, false);
-    const mpvDev = buildDevConfig(root, { SHOWRUNNER_DEV_MPV: '1' });
-    assert.equal(mpvDev.manageFrontend, true);
-    assert.equal(mpvDev.playerFrontend, 'mpv');
-    assert.equal(mpvDev.mpvWindowed, true);
-    assert.equal(mpvDev.manageBrowser, false);
+    // 与正式模式一致：看门狗默认跟随托管配置开启（开发配置显式关闭）
+    assert.equal(buildDevConfig(root, {}).frontendWatchdog, false);
 
     fs.mkdirSync(path.join(root, '.dev'), { recursive: true });
     const hash = Auth.hashPassword('changed-dev-password');

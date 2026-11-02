@@ -5,16 +5,19 @@ const { EventEmitter } = require('events');
 /**
  * 统一托管播放前端和维护浏览器，保持“正常播放实例最多一个”的不变量。
  * 模式切换及前端切换均串行执行。
+ * watchdog（自动拉起）开启时：正常模式自动启动所选前端、崩溃自动重拉；
+ * 关闭时：前端保持关闭，只能由 openFrontend() 手动打开。
  */
 class FrontendSupervisor extends EventEmitter {
-  constructor({ browser, frontends, selected = 'chrome', resolver, manage = true, manageFrontend, initialMode = 'normal', onSelectionChange, relaunchCooldownMs = 5000 }) {
+  constructor({ browser, frontends, selected = 'chrome', resolver, manage = true, watchdog = true, initialMode = 'normal', onSelectionChange, relaunchCooldownMs = 5000 }) {
     super();
     this.browser = browser;
     this.frontends = frontends;
     this.selected = frontends[selected] ? selected : 'chrome';
     this.resolver = resolver;
     this.manageBrowser = typeof browser.manage === 'boolean' ? !!browser.manage : !!manage;
-    this.manage = manageFrontend === undefined ? !!manage : !!manageFrontend;
+    this.manage = !!manage;
+    this.watchdog = !!watchdog;
     this.mode = initialMode === 'offline' ? 'offline' : 'normal';
     this.onSelectionChange = onSelectionChange;
     this.relaunchCooldownMs = relaunchCooldownMs;
@@ -40,7 +43,7 @@ class FrontendSupervisor extends EventEmitter {
     if (!this.manage) return this.status();
     await this.browser.start();
     if (this.mode === 'offline') await this.browser.setMode('offline');
-    else await this._startSelected();
+    else if (this.watchdog) await this._startSelected(); // 看门狗关闭时保持关闭，等手动打开
     return this.status();
   }
 
@@ -57,6 +60,7 @@ class FrontendSupervisor extends EventEmitter {
       mode: this.mode,
       manageBrowser: this.manageBrowser,
       manageFrontend: this.manage,
+      watchdog: this.watchdog,
       frontend: this.selected,
       playerRunning: !!player?.running,
       kioskRunning: this.selected === 'chrome' && !!browser.kioskRunning,
@@ -81,6 +85,54 @@ class FrontendSupervisor extends EventEmitter {
     return this._serial(() => this._applyFrontend(type));
   }
 
+  /** 看门狗开关：开启时按模式自动拉起；关闭时停止当前前端并保持关闭。 */
+  setWatchdog(enabled) {
+    return this._serial(async () => {
+      enabled = !!enabled;
+      const changed = enabled !== this.watchdog;
+      this.watchdog = enabled;
+      this.browser.setWatchdog?.(enabled);
+      if (this.mode === 'normal') {
+        if (enabled) {
+          if (!this.frontends[this.selected]?.status().running) await this._startSelected();
+        } else {
+          await this._stopSelected();
+        }
+      }
+      if (changed) this.emit('change', this.status());
+      return this.status();
+    });
+  }
+
+  /** 手动打开所选前端（一次性；不改变看门狗状态）。 */
+  openFrontend() {
+    return this._serial(async () => {
+      if (!this.manage) return { ok: false, error: '播放前端托管未启用', status: this.status() };
+      if (this.mode !== 'normal') {
+        return {
+          ok: false,
+          error: this.mode === 'offline' ? '已下线，请先重新上线' : '维护模式中，回锁后可打开',
+          status: this.status()
+        };
+      }
+      const ok = await this._startSelected();
+      this.emit('change', this.status());
+      return { ok, error: ok ? null : (this.frontends[this.selected].status().lastError || '前端启动失败'), status: this.status() };
+    });
+  }
+
+  /** 手动关闭所选前端，同时停用看门狗，保证关闭后不再被自动拉起。 */
+  closeFrontend() {
+    return this._serial(async () => {
+      if (!this.manage) return { ok: false, error: '播放前端托管未启用', status: this.status() };
+      await this._stopSelected();
+      this.watchdog = false;
+      this.browser.setWatchdog?.(false);
+      this.emit('change', this.status());
+      return { ok: true, status: this.status() };
+    });
+  }
+
   async _applyMode(mode) {
     if (mode === this.mode) return this.status();
     clearTimeout(this._restartTimer);
@@ -93,8 +145,10 @@ class FrontendSupervisor extends EventEmitter {
     } else {
       await this.browser.setMode('offline');
       this.mode = 'normal';
-      const ok = await this._startSelected();
-      if (!ok) this.emit('change', this.status());
+      if (this.watchdog) {
+        const ok = await this._startSelected();
+        if (!ok) this.emit('change', this.status());
+      }
     }
     this.mode = mode;
     this.emit('change', this.status());
@@ -194,7 +248,7 @@ class FrontendSupervisor extends EventEmitter {
   }
 
   _scheduleRestart() {
-    if (!this.manage || this.mode !== 'normal' || this.selected !== 'mpv') return;
+    if (!this.manage || !this.watchdog || this.mode !== 'normal' || this.selected !== 'mpv') return;
     clearTimeout(this._restartTimer);
     this._restartTimer = setTimeout(() => this._serial(async () => {
       if (this.mode !== 'normal' || this.selected !== 'mpv') return;

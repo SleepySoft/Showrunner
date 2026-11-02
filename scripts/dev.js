@@ -1,7 +1,9 @@
 'use strict';
 /**
- * 隔离开发入口：不读写正式 data/config/资产保险库，不启动或回收任何浏览器，
- * 也不操作 Windows 开机启动。默认关闭真实媒体缓存，适合普通 Chrome + DevTools。
+ * 隔离开发入口：不读写正式 data/config/资产保险库，不操作 Windows 开机启动。
+ * 绝不用 kiosk 全屏：Chrome 前端按需窗口化托管，mpv 前端同样窗口化；看门狗默认
+ * 关闭（不自动拉起），在遥控器「播放前端」里手动打开/关闭，或开启「自动拉起」。
+ * 默认关闭真实媒体缓存，适合普通 Chrome + DevTools。
  */
 const fs = require('fs');
 const path = require('path');
@@ -19,8 +21,6 @@ function buildDevConfig(rootDir, env = process.env) {
   const savedHash = Number(saved.passwordSetupVersion || 0) >= 1 ? saved.passwordHash || null : null;
   const port = Number(env.SHOWRUNNER_DEV_PORT || 7101);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SHOWRUNNER_DEV_PORT 必须是 1-65535 的端口');
-  // 显式开启后才在开发模式拉起 mpv 前端；窗口化（最大化普通窗口，非全屏）保证可自由操作
-  const mpvDev = enabled(env.SHOWRUNNER_DEV_MPV);
 
   return {
     rootDir,
@@ -37,10 +37,9 @@ function buildDevConfig(rootDir, env = process.env) {
     cacheDir: path.join(devDir, 'cache'),
     playbackIssueLog: path.join(devDir, 'playback-events.log'),
     disableCache: !enabled(env.SHOWRUNNER_DEV_CACHE),
-    manageBrowser: false,
-    manageFrontend: mpvDev,
-    playerFrontend: mpvDev ? 'mpv' : 'chrome',
-    mpvWindowed: mpvDev,
+    manageBrowser: true,      // 允许按需托管浏览器进程（手动打开 chrome 前端时）
+    kioskBrowser: false,      // 开发模式绝不用 kiosk 全屏，一律窗口化
+    frontendWatchdog: false,  // 不自动拉起前端；在遥控器里手动打开/关闭或开启自动拉起
     updateRepo: '',
     autostartManager: {
       status: async () => ({ supported: false, enabled: false, debug: true }),
@@ -62,9 +61,7 @@ async function main() {
   console.log(`  ${passwordHint}`);
   console.log(`  数据目录: ${path.dirname(cfg.dataFile)}`);
   console.log(`  真实网页缓存: ${cfg.disableCache ? '关闭（SHOWRUNNER_DEV_CACHE=1 可开启）' : '开启'}`);
-  console.log(cfg.manageFrontend
-    ? '  mpv 前端: 窗口化调试模式（SHOWRUNNER_DEV_MPV=1，最大化窗口非全屏；不拉起 Chrome）'
-    : '  mpv 前端: 不拉起（SHOWRUNNER_DEV_MPV=1 可窗口化调试，非全屏）');
+  console.log('  播放前端: 不自动拉起（遥控器「播放前端」里打开/关闭；一律窗口化，无 kiosk）');
   console.log('');
 
   let closing = false;

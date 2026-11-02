@@ -37,6 +37,7 @@ function findBrowser() {
 class BrowserController extends EventEmitter {
   constructor({
     tvUrl, chromePath, manage = true, maintenanceMinutes = 10,
+    kiosk = true, watchdog = true,
     spawnImpl = spawn, execImpl = exec, relaunchCooldownMs = 10000,
     initialMode = 'normal'
   }) {
@@ -44,6 +45,8 @@ class BrowserController extends EventEmitter {
     this.tvUrl = tvUrl;
     this.chromePath = chromePath || findBrowser();
     this.manage = manage;
+    this.kioskMode = !!kiosk;   // false = 窗口化托管（开发/调试），绝不用 kiosk 全屏
+    this.watchdog = !!watchdog; // false = 看门狗不自动重拉，仅按需打开
     this.maintenanceMs = maintenanceMinutes * 60000;
     this.spawnImpl = spawnImpl;
     this.execImpl = execImpl;
@@ -76,12 +79,28 @@ class BrowserController extends EventEmitter {
     return {
       mode: this.mode,
       manageBrowser: this.manage,
+      kiosk: this.kioskMode,
+      watchdog: this.watchdog,
       kioskRunning: !!this.kiosk,
       maintenanceBrowserRunning: !!this.maintenanceBrowser,
       managedBrowserRunning: !!(this.kiosk || this.maintenanceBrowser),
       maintenanceUntil: this.maintenanceUntil || null,
       browserFound: !!this.chromePath
     };
+  }
+
+  setWatchdog(on) {
+    this.watchdog = !!on;
+    this.emit('change', this.status());
+    return this.watchdog;
+  }
+
+  /** 手动打开：普通模式下确保受控浏览器在跑（watchdog 关闭时也可用）。 */
+  ensureRunning() {
+    if (!this.manage || this.mode !== 'normal' || this.maintenanceBrowser) return false;
+    if (Date.now() - this.lastLaunch < this.relaunchCooldownMs) return !!this.kiosk;
+    this._ensureKiosk();
+    return !!this.kiosk;
   }
 
   setMode(mode) {
@@ -127,6 +146,7 @@ class BrowserController extends EventEmitter {
       if (Date.now() > this.maintenanceUntil) await this.setMode('normal'); // 超时自动回锁
       return;
     }
+    if (!this.watchdog) return; // 看门狗关闭：不自动重拉，等手动打开
     this._ensureKiosk();
   }
 
@@ -140,7 +160,10 @@ class BrowserController extends EventEmitter {
     const profile = path.join(os.tmpdir(), 'showrunner-kiosk-profile');
     const args = [
       `--user-data-dir=${profile}`,
-      '--kiosk', '--no-first-run', '--no-default-browser-check',
+      ...(this.kioskMode
+        ? ['--kiosk']
+        : ['--start-maximized', '--new-window']), // 窗口化托管（开发/调试）：最大化普通窗口，可自由操作
+      '--no-first-run', '--no-default-browser-check',
       '--disable-session-crashed-bubble', '--autoplay-policy=no-user-gesture-required',
       this.tvUrl
     ];

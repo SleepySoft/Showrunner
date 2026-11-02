@@ -796,6 +796,18 @@ function apiRouter({ auth, setup, passwordRecovery, library, queue, playlists, c
     res.json(result.status);
   });
 
+  // 看门狗（自动拉起）与前端手动开关：关闭后前端保持关闭，只能手动打开
+  router.post('/playback/watchdog', async (req, res) => {
+    res.json(await frontendSupervisor.setWatchdog(!!req.body?.enabled));
+  });
+
+  router.post('/playback/power', async (req, res) => {
+    const action = String(req.body?.action || '');
+    if (action === 'open') return res.json(await frontendSupervisor.openFrontend());
+    if (action === 'close') return res.json(await frontendSupervisor.closeFrontend());
+    res.status(400).json({ error: 'action 只能是 open 或 close' });
+  });
+
   router.post('/mode', async (req, res) => {
     const s = await frontendSupervisor.setMode(String(req.body?.mode));
     if (!s) return res.status(400).json({ error: 'mode 只能是 normal、maintenance 或 offline' });

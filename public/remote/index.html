@@ -325,7 +325,11 @@
       </div>
       <div class="maint" id="frontendRow">
         <span id="frontendLabel">播放前端</span>
-        <select id="frontendSelect" style="max-width:150px"><option value="chrome">Chrome kiosk</option><option value="mpv">mpv 本地播放器</option></select>
+        <div class="actions">
+          <select id="frontendSelect" style="max-width:130px"><option value="chrome">Chrome kiosk</option><option value="mpv">mpv 本地播放器</option></select>
+          <label title="自动拉起：崩溃自动重拉、重启自动开播；关闭后保持关闭，可手动打开"><input type="checkbox" id="frontendWatchdog">自动拉起</label>
+          <button id="btnFrontendPower">打开</button>
+        </div>
       </div>
       <div class="maint" id="autostartRow">
         <span id="autostartLabel">开机启动：检查中…</span>
@@ -689,10 +693,16 @@ function renderMode() {
   if (!modeStatus) return;
   $('frontendSelect').value = modeStatus.frontend || 'chrome';
   const player = modeStatus.player || {};
-  $('frontendLabel').textContent = `播放前端：${modeStatus.frontend === 'mpv' ? 'mpv' : 'Chrome'}${player.lastError ? '（异常）' : ''}`;
+  const running = !!modeStatus.playerRunning;
+  $('frontendLabel').textContent = `播放前端：${modeStatus.frontend === 'mpv' ? 'mpv' : 'Chrome'}${player.lastError ? '（异常）' : ''}${running ? ' · 运行中' : ' · 已关闭'}`;
   $('frontendSelect').title = player.lastError || '';
+  $('frontendWatchdog').checked = !!modeStatus.watchdog;
+  const power = $('btnFrontendPower');
+  power.textContent = running ? '关闭' : '打开';
+  power.title = running ? '关闭播放前端，同时停用自动拉起' : '手动打开播放前端（一次性）';
+  power.disabled = !running && modeStatus.mode !== 'normal';
   const row = $('maintRow');
-  if (!modeStatus.manageBrowser) { row.style.display = 'none'; return; }
+  if (!modeStatus.kiosk) { row.style.display = 'none'; return; } // 维护/下线仅面向 kiosk 全屏场景
   row.style.display = '';
   const m = modeStatus.mode === 'maintenance';
   const offline = modeStatus.mode === 'offline';
@@ -734,6 +744,31 @@ $('frontendSelect').onchange = async () => {
     alert('切换失败：' + error.message);
     await refreshMode();
   } finally { $('frontendSelect').disabled = false; }
+};
+$('frontendWatchdog').onchange = async () => {
+  const enabled = $('frontendWatchdog').checked;
+  $('frontendWatchdog').disabled = true;
+  try {
+    modeStatus = await api('/playback/watchdog', { method: 'POST', body: { enabled } });
+    renderMode();
+  } catch (error) {
+    alert('自动拉起设置失败：' + error.message);
+    await refreshMode();
+  } finally { $('frontendWatchdog').disabled = false; }
+};
+$('btnFrontendPower').onclick = async () => {
+  const running = !!modeStatus?.playerRunning;
+  if (running && !confirm('关闭播放前端，同时停用自动拉起。继续？')) return;
+  $('btnFrontendPower').disabled = true;
+  try {
+    const result = await api('/playback/power', { method: 'POST', body: { action: running ? 'close' : 'open' } });
+    modeStatus = result.status || result;
+    if (result.error) alert(result.error);
+    renderMode();
+  } catch (error) {
+    alert('操作失败：' + error.message);
+    await refreshMode();
+  } finally { $('btnFrontendPower').disabled = false; }
 };
 $('btnOffline').onclick = async () => {
   const offline = modeStatus?.mode === 'offline';

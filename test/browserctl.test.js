@@ -64,6 +64,33 @@ test('kiosk 意外退出后 tick 自动重拉（看门狗）', async () => {
   bc.stop();
 });
 
+test('窗口化托管（kiosk=false）：最大化普通窗口，绝不带 kiosk 参数', async () => {
+  const f = makeFake();
+  const bc = new BrowserController(opts({ kiosk: false, spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
+  await bc.start(60000);
+  assert.equal(f.spawned.length, 1);
+  assert.ok(!f.spawned[0].args.includes('--kiosk'));
+  assert.ok(f.spawned[0].args.includes('--start-maximized'));
+  assert.equal(bc.status().kiosk, false);
+  assert.equal(bc.status().kioskRunning, true);
+  bc.stop();
+});
+
+test('看门狗关闭：启动与 tick 都不拉起，意外退出不重拉，ensureRunning 手动打开', async () => {
+  const f = makeFake();
+  const bc = new BrowserController(opts({ watchdog: false, spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
+  await bc.start(60000);
+  assert.equal(f.spawned.length, 0);
+  await bc.tick();
+  assert.equal(f.spawned.length, 0);
+  assert.equal(bc.ensureRunning(), true);
+  assert.equal(f.spawned.length, 1);
+  f.spawned[0].simulateExit();
+  await bc.tick();
+  assert.equal(f.spawned.length, 1);
+  bc.stop();
+});
+
 test('维护模式：回收 kiosk 后只打开一个受控普通窗口', async () => {
   const f = makeFake();
   const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl }));
@@ -192,6 +219,15 @@ test('GET /api/mode 返回托管状态', async () => {
   const s = await (await authed('/api/mode')).json();
   assert.equal(s.mode, 'normal');
   assert.equal(s.manageBrowser, false);
+});
+
+test('POST /api/playback/watchdog 与 /api/playback/power（托管关闭时手动打开被拒绝）', async () => {
+  const s = await (await authed('/api/playback/watchdog', { method: 'POST', body: JSON.stringify({ enabled: false }) })).json();
+  assert.equal(s.watchdog, false);
+  const bad = await (await authed('/api/playback/power', { method: 'POST', body: JSON.stringify({ action: 'noop' }) })).json();
+  assert.ok(bad.error.includes('open 或 close'));
+  const r = await (await authed('/api/playback/power', { method: 'POST', body: JSON.stringify({ action: 'open' }) })).json();
+  assert.equal(r.ok, false);
 });
 
 test('POST /api/mode 切换模式', async () => {

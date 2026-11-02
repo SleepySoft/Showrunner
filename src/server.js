@@ -151,19 +151,26 @@ function createApp(cfg) {
   });
 
   // 播放前端：Chrome 与 mpv 共用队列权威状态、受信任源解析和维护/下线生命周期。
+  // kiosk=false 时 Chrome 前端用窗口化托管（开发/调试），mpv 同步窗口化，绝不全屏；
+  // 看门狗（自动拉起）持久化在 settings.frontendWatchdog，缺省跟随托管配置。
   const selectedFrontend = cfg.playerFrontend === 'mpv' ? 'mpv' : 'chrome';
   const initialMode = persisted.settings?.offline ? 'offline' : 'normal';
+  const kioskBrowser = cfg.kioskBrowser === undefined ? !!cfg.manageBrowser : !!cfg.kioskBrowser;
+  const watchdogDefault = cfg.frontendWatchdog === undefined ? true : !!cfg.frontendWatchdog;
+  const frontendWatchdog = typeof persisted.settings?.frontendWatchdog === 'boolean' ? persisted.settings.frontendWatchdog : watchdogDefault;
   const browserProcess = new BrowserController({
     tvUrl: `http://localhost:${cfg.port}/tv/`,
     chromePath: cfg.chromePath,
     manage: !!cfg.manageBrowser,
+    kiosk: kioskBrowser,
+    watchdog: frontendWatchdog,
     initialMode: selectedFrontend === 'chrome' && initialMode === 'normal' ? 'normal' : 'offline'
   });
   const resolver = new PlayableSourceResolver({ library, cache });
   const chromeFrontend = new ChromeFrontend(browserProcess);
   const mpvFrontend = cfg.mpvFrontend || new MpvFrontend({
     mpvPath: findMpv(cfg.mpvPath, cfg.rootDir), rootDir: cfg.rootDir,
-    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf, windowed: !!cfg.mpvWindowed
+    ipcPath: cfg.mpvIpcPath, inputConf: cfg.mpvInputConf, windowed: !kioskBrowser
   });
   const frontendSupervisor = cfg.frontendSupervisor || new FrontendSupervisor({
     browser: browserProcess,
@@ -171,7 +178,7 @@ function createApp(cfg) {
     selected: selectedFrontend,
     resolver,
     manage: !!cfg.manageBrowser,
-    manageFrontend: cfg.manageFrontend === undefined ? !!cfg.manageBrowser : !!cfg.manageFrontend,
+    watchdog: frontendWatchdog,
     initialMode,
     onSelectionChange: type => saveConfigPatch(cfg.configFile || path.join(cfg.rootDir, 'config.json'), { playerFrontend: type })
   });
@@ -201,7 +208,7 @@ function createApp(cfg) {
     ...collections.serialize(),
     currentIndex: queue.currentIndex,
     playback: queue.playback,
-    settings: { mediaDirs: library.mediaDirs, schedules: scheduler.serialize(), offline: frontendSupervisor.mode === 'offline' }
+    settings: { mediaDirs: library.mediaDirs, schedules: scheduler.serialize(), offline: frontendSupervisor.mode === 'offline', frontendWatchdog: frontendSupervisor.watchdog }
   });
   const persist = () => {
     try {
@@ -486,9 +493,9 @@ function createApp(cfg) {
   });
 
   // 播放端与媒体流：局域网专用，不鉴权
-  // 非托管（开发/调试）模式给电视页注入环境标记，页面据此解除 kiosk 专属的
+  // 非 kiosk（开发/调试）模式给电视页注入环境标记，页面据此解除 kiosk 专属的
   // 锁定交互（隐藏光标、禁右键/双击），恢复普通浏览器的可操作性。
-  if (!cfg.manageBrowser) {
+  if (!kioskBrowser) {
     const tvIndexFile = path.join(cfg.rootDir, 'public', 'tv', 'index.html');
     const serveTvIndex = (_req, res) => {
       const html = fs.readFileSync(tvIndexFile, 'utf8').replace('</head>', '<script>window.__SHOWRUNNER_UNMANAGED__=true</script></head>');

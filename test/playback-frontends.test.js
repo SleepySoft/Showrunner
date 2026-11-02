@@ -93,14 +93,80 @@ test('MpvFrontend 窗口化模式不启用全屏/置顶/无边框，方便开发
   await mpv.stop();
 });
 
-test('ChromeFrontend 在非托管模式下拒绝拉起 kiosk', async () => {
+test('ChromeFrontend 统一走控制器：非普通模式先切回，再 ensureRunning 保证实例在跑', async () => {
   const { ChromeFrontend } = require('../src/playback/chrome');
   const calls = [];
-  const browser = { manage: false, setMode: async mode => { calls.push(mode); return {}; }, status: () => ({ browserFound: true, kioskRunning: false, manageBrowser: false }) };
+  const state = { mode: 'offline' };
+  const browser = {
+    manage: true,
+    setMode: async mode => { calls.push(mode); state.mode = mode; return { mode }; },
+    ensureRunning: async () => { calls.push('ensure'); return true; },
+    status: () => ({ mode: state.mode, browserFound: true, kioskRunning: state.mode === 'normal', manageBrowser: true })
+  };
   const chrome = new ChromeFrontend(browser);
-  assert.equal(await chrome.start(), false);
-  assert.deepEqual(calls, []);
-  assert.match(chrome.status().lastError, /非托管/);
+  assert.equal(await chrome.start(), true);
+  assert.deepEqual(calls, ['normal', 'ensure']);
+  calls.length = 0;
+  assert.equal(await chrome.start(), true); // 已是普通模式：不重复切换
+  assert.deepEqual(calls, ['ensure']);
+});
+
+test('FrontendSupervisor 看门狗关闭：启动不自动拉起，可手动打开；关闭即停用看门狗', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = true;
+  const browserWd = [];
+  browser.setWatchdog = on => { browserWd.push(on); return on; };
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  const supervisor = new FrontendSupervisor({
+    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver: {},
+    manage: true, watchdog: false
+  });
+  await supervisor.start();
+  assert.ok(!mpv.calls.includes('start')); // 看门狗关闭：启动不拉起
+  const opened = await supervisor.openFrontend();
+  assert.equal(opened.ok, true);
+  assert.ok(mpv.calls.includes('start'));  // 手动打开
+  assert.equal(supervisor.watchdog, false); // 手动打开不改变看门狗
+  const closed = await supervisor.closeFrontend();
+  assert.equal(closed.ok, true);
+  assert.ok(mpv.calls.includes('stop'));
+  assert.equal(supervisor.watchdog, false); // 关闭同时停用看门狗
+  assert.deepEqual(browserWd, [false]);     // 浏览器看门狗同步停用
+});
+
+test('FrontendSupervisor setWatchdog(true) 自动拉起前端，setWatchdog(false) 停止并保持关闭', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = true;
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  const supervisor = new FrontendSupervisor({
+    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver: {},
+    manage: true, watchdog: false
+  });
+  await supervisor.start();
+  await supervisor.setWatchdog(true);
+  assert.ok(mpv.calls.includes('start'));
+  await supervisor.setWatchdog(false);
+  assert.ok(mpv.calls.includes('stop'));
+  assert.ok(!mpv.running);
+  const opened = await supervisor.openFrontend();
+  assert.equal(opened.ok, true); // 手动打开仍可用
+});
+
+test('FrontendSupervisor openFrontend 在下线/维护模式拒绝打开', async () => {
+  const browser = new FakeBrowser('offline');
+  browser.manage = true;
+  const chrome = new FakeFrontend('chrome');
+  const mpv = new FakeFrontend('mpv');
+  const supervisor = new FrontendSupervisor({
+    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver: {},
+    manage: true, watchdog: true
+  });
+  await supervisor.setMode('offline');
+  const r = await supervisor.openFrontend();
+  assert.equal(r.ok, false);
+  assert.match(r.error, /下线/);
 });
 
 class FakeFrontend extends EventEmitter {
@@ -144,23 +210,21 @@ test('FrontendSupervisor 串行停旧启新，失败时恢复 Chrome 且不保�
   assert.deepEqual(chrome.calls, ['start', 'stop', 'start']);
 });
 
-test('FrontendSupervisor 拆分管理：浏览器不托管时仍可单独托管 mpv 前端（开发模式）', async () => {
+test('FrontendSupervisor 完全不托管（manage=false）时不启动任何前端', async () => {
   const browser = new FakeBrowser('offline');
   browser.manage = false;
   const chrome = new FakeFrontend('chrome');
   const mpv = new FakeFrontend('mpv');
-  const resolver = { resolve: () => ({ status: 'ready', source: { kind: 'file', uri: path.resolve('episode.mkv'), trusted: true } }) };
   const supervisor = new FrontendSupervisor({
-    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver,
-    manage: false, manageFrontend: true
+    browser, frontends: { chrome, mpv }, selected: 'mpv', resolver: {},
+    manage: false, watchdog: true
   });
   const status = await supervisor.start();
   assert.equal(status.manageBrowser, false);
-  assert.equal(status.manageFrontend, true);
-  assert.ok(mpv.calls.includes('start'));   // mpv 前端被拉起
-  assert.ok(!chrome.calls.includes('start')); // chrome/kiosk 不拉起
-  await supervisor.sync({ status: 'idle', position: 0, volume: 1, updatedAt: 1, current: null });
-  assert.ok(mpv.calls.some(call => Array.isArray(call) && call[0] === 'standby')); // 权威状态照常同步到 mpv
+  assert.equal(status.manageFrontend, false);
+  assert.ok(!mpv.calls.includes('start'));
+  const opened = await supervisor.openFrontend();
+  assert.equal(opened.ok, false); // 托管未启用：手动打开也不行
 });
 
 test('FrontendSupervisor 缺省行为不变：仅传 manage 时两者一致', async () => {

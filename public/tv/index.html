@@ -139,6 +139,23 @@ const unmanaged = window.__SHOWRUNNER_UNMANAGED__ === true; // 仅控制光标�
 if (unmanaged) {
   document.body.classList.add('dev');
   $('devBadge').hidden = false;
+  // 按键显示：屏幕右下角短暂显示按下的键/鼠标键，便于核对物理遥控器实际发送的键值。
+  // repeat=true 表示长按自动重复——这正是 mpv 里“按住键盘右键菜单反复开关”的原因。
+  const keyOsd = document.createElement('div');
+  keyOsd.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99;background:rgba(0,0,0,.75);color:#3f6;font:16px/1.5 monospace;padding:6px 14px;border-radius:6px;pointer-events:none;display:none';
+  document.body.appendChild(keyOsd);
+  let keyOsdTimer = null;
+  const showKey = label => {
+    keyOsd.textContent = label;
+    keyOsd.style.display = '';
+    clearTimeout(keyOsdTimer);
+    keyOsdTimer = setTimeout(() => { keyOsd.style.display = 'none'; }, 1200);
+  };
+  const mouseName = b => ({ 0: '左键', 1: '中键', 2: '右键', 3: '侧键-后退', 4: '侧键-前进' })[b] || ('键' + b);
+  window.addEventListener('keydown', e => showKey(`↓ ${e.key} (code=${e.code}${e.repeat ? ', repeat' : ''})`), true);
+  window.addEventListener('keyup', e => showKey(`↑ ${e.key} (code=${e.code})`), true);
+  window.addEventListener('mousedown', e => showKey(`鼠标${e.detail > 1 ? e.detail + '击' : ''}${mouseName(e.button)} button=${e.button}`), true);
+  window.addEventListener('wheel', e => showKey(`滚轮 ΔY=${e.deltaY}`), { capture: true, passive: true });
 }
 window.addEventListener('contextmenu', e => {
   if (e.shiftKey) return; // 调试逃生门

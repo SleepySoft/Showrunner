@@ -132,19 +132,27 @@ async function refreshFirstSetup() {
 refreshFirstSetup();
 setInterval(refreshFirstSetup, 2000);
 
-// 服务端托管 kiosk 时接管浏览器右键菜单和双击全屏；右键作为遥控器的菜单/返回键。
-// 非托管（开发/调试）模式保持普通浏览器行为：不隐藏光标，也不拦截右键/双击。
-const unmanaged = window.__SHOWRUNNER_UNMANAGED__ === true;
+// 接管浏览器右键菜单和双击全屏：物理遥控器的“菜单”键在系统层常被当作鼠标右键
+// （空中飞鼠右键、VK_APPS 上下文键），不接管会同时弹出 Chrome 原生菜单。
+// 右键作为遥控器的菜单/返回键。Shift+右键保留为调试逃生门（原生菜单/检查元素）。
+const unmanaged = window.__SHOWRUNNER_UNMANAGED__ === true; // 仅控制光标与徽标
 if (unmanaged) {
   document.body.classList.add('dev');
   $('devBadge').hidden = false;
 }
 window.addEventListener('contextmenu', e => {
-  if (unmanaged) return;
+  if (e.shiftKey) return; // 调试逃生门
   e.preventDefault();
   if (!$('firstSetup').classList.contains('show')) remoteMenuKey();
 }, { capture: true });
-window.addEventListener('dblclick', e => { if (!unmanaged) e.preventDefault(); }, { capture: true });
+window.addEventListener('dblclick', e => { if (!e.shiftKey) e.preventDefault(); }, { capture: true });
+// 菜单/返回键的 keyup 同样吞掉：部分按键（如 ContextMenu）浏览器在 keyup 阶段
+// 仍有默认行为（弹原生菜单/焦点转移），只拦 keydown 不够。
+window.addEventListener('keyup', e => {
+  if (e.key === 'Escape' || e.key === 'ContextMenu' || e.key === 'BrowserBack' || e.key === 'Back') {
+    e.preventDefault(); e.stopPropagation();
+  }
+}, { capture: true });
 video.controls = false;
 video.disablePictureInPicture = true;
 

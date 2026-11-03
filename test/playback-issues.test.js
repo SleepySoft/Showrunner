@@ -141,6 +141,59 @@ test('mpv 音频输出未启动只记录不跳过节目，诊断页返回打码�
   }
 });
 
+test('遥控器 menu/confirm 长按重复触发在服务端去抖，up/down 翻页不受影响', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-input-debounce-'));
+  let app;
+  try {
+    const dataFile = path.join(tmp, 'showrunner.json');
+    fs.writeFileSync(dataFile, JSON.stringify({
+      playlists: [{ id: 'p1', name: '频道', enabled: true, autoPlay: true, items: [
+        { qid: 'q1', type: 'local', mediaId: 'm1', title: '正片' }
+      ] }],
+      activeId: 'p1', currentIndex: 0,
+      playback: { status: 'idle', position: 0, duration: 0, volume: 1 },
+      settings: {}, collections: []
+    }));
+    const menus = [];
+    const standbys = [];
+    class FakeMpv extends EventEmitter {
+      constructor() { super(); this.running = true; }
+      async start() { this.running = true; return true; }
+      async stop() { this.running = false; }
+      async load() {} async play() {} async pause() {} async seek() {}
+      async setVolume() {}
+      async showStandby() { standbys.push(1); }
+      showMenu(model) { menus.push(model); }
+      status() { return { type: 'mpv', available: true, running: this.running, ready: this.running, currentQid: null, lastError: null }; }
+    }
+    const mpvFrontend = new FakeMpv();
+    app = await start({
+      rootDir: path.join(__dirname, '..'), password: 'pw', host: '127.0.0.1', port: 0,
+      dataFile, mediaDirs: [], cacheDir: path.join(tmp, 'cache'), disableCache: true,
+      playbackIssueLog: path.join(tmp, 'events.log'), disableScheduler: true, disableChannelTimer: true,
+      manageBrowser: false, playerFrontend: 'mpv', mpvFrontend
+    });
+    mpvFrontend.emit('input', 'menu');
+    await new Promise(r => setTimeout(r, 10));
+    mpvFrontend.emit('input', 'menu'); // 长按重复：应被吞掉
+    await new Promise(r => setTimeout(r, 10));
+    mpvFrontend.emit('input', 'menu');
+    assert.equal(menus.length, 1, '200ms 内重复的 menu 只生效一次');
+    mpvFrontend.emit('input', 'up');
+    mpvFrontend.emit('input', 'up'); // 翻页不防抖
+    assert.equal(menus.length, 3, 'up/down 每次都要刷新菜单');
+    await new Promise(r => setTimeout(r, 220));
+    mpvFrontend.emit('input', 'menu'); // 间隔超过 200ms：正常生效，此时菜单开着 → 关闭
+    assert.equal(menus.length, 3, '关闭菜单不再刷新 OSD 菜单');
+    await new Promise(r => setTimeout(r, 220));
+    mpvFrontend.emit('input', 'menu'); // 再超过 200ms：重新打开（manage=false 时关闭路径无界面副作用，用再开验证）
+    assert.equal(menus.length, 4, '去抖窗口过后 menu 恢复正常切换');
+  } finally {
+    if (app) await app.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('电视报告格式不支持时启动兼容转换而不是跳过节目', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-compat-ws-'));
   let app;

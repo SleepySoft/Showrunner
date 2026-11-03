@@ -503,6 +503,9 @@ function remoteMenuKey() {
 $('vodClose').onclick = () => openChannelMenu();
 
 // 最小共同按键：鼠标右键菜单/返回，左键点击确认；四个方向键移动，Enter 也可确认。
+// 物理遥控器长按会反复触发同一键（自动重复或离散重发）：菜单/确认类动作 200ms 去抖，
+// 避免菜单反复开关、确认连击；方向键保留连发便于快速翻页。
+let lastToggleKeyAt = 0;
 window.addEventListener('keydown', event => {
   const key = event.key;
   const isPrevious = key === 'ArrowUp' || key === 'ArrowLeft';
@@ -511,6 +514,11 @@ window.addEventListener('keydown', event => {
   const isMenu = key === 'Escape' || key === 'ContextMenu' || key === 'BrowserBack' || key === 'Back';
   if (!isPrevious && !isNext && !isConfirm && !isMenu) return; // 音量、电源等系统键不拦截
   event.preventDefault(); event.stopPropagation();
+  if (isMenu || isConfirm) {
+    const now = Date.now();
+    if (event.repeat || now - lastToggleKeyAt < 200) return;
+    lastToggleKeyAt = now;
+  }
   if (isMenu) { remoteMenuKey(); return; }
   if (remoteLayer === 'closed') {
     if (isConfirm) return;

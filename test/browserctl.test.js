@@ -181,6 +181,27 @@ test('manage=false 完全不碰浏览器（含模式切换）', async () => {
   bc.stop();
 });
 
+test('受控 profile 主页写成电视页地址（HOME 键导回电视页），且不覆盖已有偏好', async () => {
+  const f = makeFake();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-prof-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'showrunner-kiosk-profile'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'showrunner-kiosk-profile', 'Preferences'), JSON.stringify({ custom: 1 }));
+    const bc = new BrowserController(opts({ spawnImpl: f.spawnImpl, execImpl: f.execImpl, profileBase: dir }));
+    await bc.start(60000);
+    const prefs = JSON.parse(fs.readFileSync(path.join(dir, 'showrunner-kiosk-profile', 'Preferences'), 'utf8'));
+    assert.equal(prefs.homepage, 'http://localhost:7100/tv/');
+    assert.equal(prefs.homepage_is_newtabpage, false);
+    assert.equal(prefs.custom, 1); // 合并写入，不覆盖 Chrome 已落盘的其他偏好
+    await bc.setMode('maintenance');
+    const mprefs = JSON.parse(fs.readFileSync(path.join(dir, 'showrunner-maintenance-profile', 'Preferences'), 'utf8'));
+    assert.equal(mprefs.homepage, 'http://localhost:7100/tv/');
+    bc.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------- /api/mode 集成 ----------
 
 let tmp, srv, base, cookie;

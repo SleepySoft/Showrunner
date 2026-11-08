@@ -39,10 +39,11 @@ class BrowserController extends EventEmitter {
     tvUrl, chromePath, manage = true, maintenanceMinutes = 10,
     kiosk = true, watchdog = true,
     spawnImpl = spawn, execImpl = exec, relaunchCooldownMs = 10000,
-    initialMode = 'normal'
+    initialMode = 'normal', profileBase = null
   }) {
     super();
     this.tvUrl = tvUrl;
+    this.profileBase = profileBase || os.tmpdir(); // 受控 profile 根目录，测试可注入隔离
     this.chromePath = chromePath || findBrowser();
     this.manage = manage;
     this.kioskMode = !!kiosk;   // false = 窗口化托管（开发/调试），绝不用 kiosk 全屏
@@ -150,6 +151,22 @@ class BrowserController extends EventEmitter {
     this._ensureKiosk();
   }
 
+  // 遥控器 HOME 键（Alt+Home / 浏览器主页多媒体键）是浏览器级命令，页面 JS 拦不住，
+  // 会把受控窗口导去浏览器默认首页、把电视页挤掉。把受控 profile 的主页写成电视页地址：
+  // 按 HOME = 回到电视页。Chrome 退出时会重写 Preferences，所以每次拉起前重设。
+  _ensureHomepagePref(profile) {
+    try {
+      const file = path.join(profile, 'Preferences');
+      let prefs = {};
+      try { prefs = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* 首次启动尚无 Preferences */ }
+      if (prefs.homepage === this.tvUrl && prefs.homepage_is_newtabpage === false) return;
+      prefs.homepage = this.tvUrl;
+      prefs.homepage_is_newtabpage = false;
+      fs.mkdirSync(profile, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(prefs));
+    } catch { /* 写失败不阻塞浏览器启动 */ }
+  }
+
   _ensureKiosk() {
     if (this.kiosk) return;
     if (this.maintenanceBrowser) return; // 单实例不变量：旧模式未回收时绝不拉新实例
@@ -157,7 +174,8 @@ class BrowserController extends EventEmitter {
     if (Date.now() - this.lastLaunch < this.relaunchCooldownMs) return;
     this.lastLaunch = Date.now();
 
-    const profile = path.join(os.tmpdir(), 'showrunner-kiosk-profile');
+    const profile = path.join(this.profileBase, 'showrunner-kiosk-profile');
+    this._ensureHomepagePref(profile);
     const args = [
       `--user-data-dir=${profile}`,
       ...(this.kioskMode
@@ -184,7 +202,8 @@ class BrowserController extends EventEmitter {
 
   _openMaintenanceBrowser() {
     if (this.kiosk || this.maintenanceBrowser || !this.chromePath) return;
-    const profile = path.join(os.tmpdir(), 'showrunner-maintenance-profile');
+    const profile = path.join(this.profileBase, 'showrunner-maintenance-profile');
+    this._ensureHomepagePref(profile);
     const args = [
       `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', '--disable-session-crashed-bubble',

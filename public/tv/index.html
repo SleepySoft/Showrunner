@@ -508,6 +508,9 @@ $('vodClose').onclick = () => openChannelMenu();
 let lastToggleKeyAt = 0;
 window.addEventListener('keydown', event => {
   const key = event.key;
+  // HOME：普通 Home 键拦下当作“回到顶层”——关掉全部浮层回到纯播放画面；
+  // 浏览器级的 Alt+Home/主页多媒体键拦不住导航，由受管 profile 的主页设置兜回电视页。
+  if (key === 'Home') { event.preventDefault(); event.stopPropagation(); closeRemoteMenus(); return; }
   const isPrevious = key === 'ArrowUp' || key === 'ArrowLeft';
   const isNext = key === 'ArrowDown' || key === 'ArrowRight';
   const isConfirm = key === 'Enter' || key === 'OK' || key === 'Select';

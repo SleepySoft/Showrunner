@@ -152,15 +152,32 @@ if (unmanaged) {
     keyOsdTimer = setTimeout(() => { keyOsd.style.display = 'none'; }, 1200);
   };
   const mouseName = b => ({ 0: '左键', 1: '中键', 2: '右键', 3: '侧键-后退', 4: '侧键-前进' })[b] || ('键' + b);
-  window.addEventListener('keydown', e => showKey(`↓ ${e.key} (code=${e.code}${e.repeat ? ', repeat' : ''})`), true);
-  window.addEventListener('keyup', e => showKey(`↑ ${e.key} (code=${e.code})`), true);
+  // 记录最近事件并显示与上一事件的毫秒间隔：遥控器连发/双重触发一目了然。
+  // window.__keyEvents 供诊断读取。
+  let lastKeyEventAt = 0;
+  window.__keyEvents = [];
+  const recordKey = (type, label, key) => {
+    const now = Date.now();
+    const delta = lastKeyEventAt ? now - lastKeyEventAt : 0;
+    lastKeyEventAt = now;
+    window.__keyEvents.push({ t: now, type, key, delta });
+    if (window.__keyEvents.length > 24) window.__keyEvents.shift();
+    showKey(`${label} +${delta}ms`);
+  };
+  window.addEventListener('keydown', e => recordKey('keydown', `↓ ${e.key} (code=${e.code}${e.repeat ? ', repeat' : ''})`, e.key), true);
+  window.addEventListener('keyup', e => recordKey('keyup', `↑ ${e.key} (code=${e.code})`, e.key), true);
+  window.addEventListener('contextmenu', () => recordKey('contextmenu', '≡ contextmenu 事件', 'ContextMenu'), true);
   window.addEventListener('mousedown', e => showKey(`鼠标${e.detail > 1 ? e.detail + '击' : ''}${mouseName(e.button)} button=${e.button}`), true);
   window.addEventListener('wheel', e => showKey(`滚轮 ΔY=${e.deltaY}`), { capture: true, passive: true });
 }
+// 遥控器 ContextMenu 键按下后，Chrome 除了 keydown 还会补发一个 contextmenu 事件；
+// 两个入口必须合并成一次菜单切换，否则按一下=开+关两次切换，菜单永远关不掉。
+let lastCtxMenuKeyAt = 0;
 window.addEventListener('contextmenu', e => {
   if (e.shiftKey) return; // 调试逃生门
   e.preventDefault();
-  if (!$('firstSetup').classList.contains('show')) remoteMenuKey();
+  if (Date.now() - lastCtxMenuKeyAt < 120) return; // 键盘 ContextMenu 键已由 keydown 处理
+  if (!$('firstSetup').classList.contains('show')) remoteMenuKeyDebounced();
 }, { capture: true });
 window.addEventListener('dblclick', e => { if (!e.shiftKey) e.preventDefault(); }, { capture: true });
 // 菜单/返回键的 keyup 同样吞掉：部分按键（如 ContextMenu）浏览器在 keyup 阶段
@@ -506,6 +523,13 @@ $('vodClose').onclick = () => openChannelMenu();
 // 物理遥控器长按会反复触发同一键（自动重复或离散重发）：菜单/确认类动作 200ms 去抖，
 // 避免菜单反复开关、确认连击；方向键保留连发便于快速翻页。
 let lastToggleKeyAt = 0;
+// 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）共用去抖窗口。
+function remoteMenuKeyDebounced() {
+  const now = Date.now();
+  if (now - lastToggleKeyAt < 200) return;
+  lastToggleKeyAt = now;
+  remoteMenuKey();
+}
 window.addEventListener('keydown', event => {
   const key = event.key;
   // HOME：普通 Home 键拦下当作“回到顶层”——关掉全部浮层回到纯播放画面；
@@ -522,7 +546,11 @@ window.addEventListener('keydown', event => {
     if (event.repeat || now - lastToggleKeyAt < 200) return;
     lastToggleKeyAt = now;
   }
-  if (isMenu) { remoteMenuKey(); return; }
+  if (isMenu) {
+    if (key === 'ContextMenu') lastCtxMenuKeyAt = Date.now();
+    remoteMenuKey();
+    return;
+  }
   if (remoteLayer === 'closed') {
     if (isConfirm) return;
     openChannelMenu();

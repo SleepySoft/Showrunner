@@ -163,13 +163,21 @@ if (unmanaged) {
     window.__keyEvents.push({ t: now, type, key: e.key, delta });
     if (window.__keyEvents.length > 24) window.__keyEvents.shift();
     showKey(`${label} +${delta}ms`);
-    keyLog({ v: 'key', type, key: e.key, code: e.code, repeat: !!e.repeat, delta });
+    keyLog({ v: 'key', type, key: e.key, code: e.code, repeat: !!e.repeat, delta, focus: document.hasFocus() });
   };
   window.addEventListener('keydown', e => recordKey('keydown', e, `↓ ${e.key} (code=${e.code}${e.repeat ? ', repeat' : ''})`), true);
   window.addEventListener('keyup', e => recordKey('keyup', e, `↑ ${e.key} (code=${e.code})`), true);
   window.addEventListener('contextmenu', () => recordKey('contextmenu', { key: 'ContextMenu' }, '≡ contextmenu 事件'), true);
-  window.addEventListener('mousedown', e => showKey(`鼠标${e.detail > 1 ? e.detail + '击' : ''}${mouseName(e.button)} button=${e.button}`), true);
-  window.addEventListener('wheel', e => showKey(`滚轮 ΔY=${e.deltaY}`), { capture: true, passive: true });
+  window.addEventListener('mousedown', e => {
+    showKey(`鼠标${e.detail > 1 ? e.detail + '击' : ''}${mouseName(e.button)} button=${e.button}`);
+    keyLog({ v: 'key', type: 'mousedown', key: 'Mouse' + e.button, focus: document.hasFocus() });
+  }, true);
+  window.addEventListener('wheel', e => {
+    showKey(`滚轮 ΔY=${e.deltaY}`);
+    keyLog({ v: 'key', type: 'wheel', key: 'Wheel', deltaY: e.deltaY, focus: document.hasFocus() });
+  }, { capture: true, passive: true });
+  // 注意：不放鼠标移动监听——kiosk 生产页静态约束禁止 mousemove 监听；
+  // 飞鼠模式的遥控器方向键发鼠标移动，dev 下直接观察光标是否移动即可。
 }
 // dev 按键诊断日志：事件与菜单切换决策上报服务端落盘（<rootDir>/.dev/tv-key.log），
 // 仅非托管模式启用；缓冲 300ms 批量写，页面隐藏时冲刷。
@@ -195,6 +203,9 @@ function keyLogFlush() {
   }).catch(() => {});
 }
 window.addEventListener('pagehide', keyLogFlush);
+// 启动标记：记录页面地址与加载后焦点状态，排除“看的不是这个页面/焦点不对”的争议。
+keyLog({ v: 'boot', url: location.href, focus: document.hasFocus() });
+setTimeout(() => keyLog({ v: 'focus', hasFocus: document.hasFocus() }), 1000);
 // 遥控器 ContextMenu 键按下后，Chrome 除了 keydown 还会补发一个 contextmenu 事件；
 // 两个入口必须合并成一次菜单切换，否则按一下=开+关两次切换，菜单永远关不掉。
 let lastCtxMenuKeyAt = 0;

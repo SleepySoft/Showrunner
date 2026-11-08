@@ -528,6 +528,21 @@ function createApp(cfg) {
     app.get('/tv', serveTvIndex);
     app.get('/tv/', serveTvIndex);
     app.get('/tv/index.html', serveTvIndex);
+    // 按键诊断日志：非托管电视页把按键事件与菜单切换决策上报到这里落盘
+    //（<rootDir>/.dev/tv-key.log），仅回环可写，用于分析物理遥控器连发/双重触发。
+    const tvKeyLogFile = path.join(cfg.rootDir, '.dev', 'tv-key.log');
+    app.post('/tv/keylog', express.json({ limit: '64kb' }), (req, res) => {
+      if (!isLoopback(req.socket.remoteAddress)) return res.status(404).end();
+      try {
+        const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 50) : [];
+        if (events.length) {
+          fs.mkdirSync(path.dirname(tvKeyLogFile), { recursive: true });
+          const rx = Date.now();
+          fs.appendFileSync(tvKeyLogFile, events.map(e => JSON.stringify({ rx, ...e })).join('\n') + '\n');
+        }
+      } catch { /* 诊断日志写失败不影响播放端 */ }
+      res.json({ ok: true });
+    });
   }
   app.use('/tv', express.static(path.join(cfg.rootDir, 'public', 'tv')));
   app.use('/media', mediaRouter(library));

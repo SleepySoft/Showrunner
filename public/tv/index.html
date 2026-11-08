@@ -153,30 +153,57 @@ if (unmanaged) {
   };
   const mouseName = b => ({ 0: '左键', 1: '中键', 2: '右键', 3: '侧键-后退', 4: '侧键-前进' })[b] || ('键' + b);
   // 记录最近事件并显示与上一事件的毫秒间隔：遥控器连发/双重触发一目了然。
-  // window.__keyEvents 供诊断读取。
+  // window.__keyEvents 供诊断读取，同时经 keyLog 落盘（.dev/tv-key.log）。
   let lastKeyEventAt = 0;
   window.__keyEvents = [];
-  const recordKey = (type, label, key) => {
+  const recordKey = (type, e, label) => {
     const now = Date.now();
     const delta = lastKeyEventAt ? now - lastKeyEventAt : 0;
     lastKeyEventAt = now;
-    window.__keyEvents.push({ t: now, type, key, delta });
+    window.__keyEvents.push({ t: now, type, key: e.key, delta });
     if (window.__keyEvents.length > 24) window.__keyEvents.shift();
     showKey(`${label} +${delta}ms`);
+    keyLog({ v: 'key', type, key: e.key, code: e.code, repeat: !!e.repeat, delta });
   };
-  window.addEventListener('keydown', e => recordKey('keydown', `↓ ${e.key} (code=${e.code}${e.repeat ? ', repeat' : ''})`, e.key), true);
-  window.addEventListener('keyup', e => recordKey('keyup', `↑ ${e.key} (code=${e.code})`, e.key), true);
-  window.addEventListener('contextmenu', () => recordKey('contextmenu', '≡ contextmenu 事件', 'ContextMenu'), true);
+  window.addEventListener('keydown', e => recordKey('keydown', e, `↓ ${e.key} (code=${e.code}${e.repeat ? ', repeat' : ''})`), true);
+  window.addEventListener('keyup', e => recordKey('keyup', e, `↑ ${e.key} (code=${e.code})`), true);
+  window.addEventListener('contextmenu', () => recordKey('contextmenu', { key: 'ContextMenu' }, '≡ contextmenu 事件'), true);
   window.addEventListener('mousedown', e => showKey(`鼠标${e.detail > 1 ? e.detail + '击' : ''}${mouseName(e.button)} button=${e.button}`), true);
   window.addEventListener('wheel', e => showKey(`滚轮 ΔY=${e.deltaY}`), { capture: true, passive: true });
 }
+// dev 按键诊断日志：事件与菜单切换决策上报服务端落盘（<rootDir>/.dev/tv-key.log），
+// 仅非托管模式启用；缓冲 300ms 批量写，页面隐藏时冲刷。
+let keyLogBuf = [];
+let keyLogTimer = null;
+function keyLog(entry) {
+  if (!unmanaged) return;
+  keyLogBuf.push(entry);
+  if (keyLogBuf.length >= 20) return keyLogFlush();
+  clearTimeout(keyLogTimer);
+  keyLogTimer = setTimeout(keyLogFlush, 300);
+}
+function keyLogFlush() {
+  clearTimeout(keyLogTimer);
+  keyLogTimer = null;
+  if (!keyLogBuf.length) return;
+  const events = keyLogBuf.splice(0);
+  fetch('/tv/keylog', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events }),
+    keepalive: true
+  }).catch(() => {});
+}
+window.addEventListener('pagehide', keyLogFlush);
 // 遥控器 ContextMenu 键按下后，Chrome 除了 keydown 还会补发一个 contextmenu 事件；
 // 两个入口必须合并成一次菜单切换，否则按一下=开+关两次切换，菜单永远关不掉。
 let lastCtxMenuKeyAt = 0;
 window.addEventListener('contextmenu', e => {
   if (e.shiftKey) return; // 调试逃生门
   e.preventDefault();
-  if (Date.now() - lastCtxMenuKeyAt < 120) return; // 键盘 ContextMenu 键已由 keydown 处理
+  const sinceCtxKey = Date.now() - lastCtxMenuKeyAt;
+  // 键盘 ContextMenu 键已由 keydown 处理；记录跳过便于诊断连发节奏。
+  if (sinceCtxKey < 120) { keyLog({ v: 'decision', action: 'ctxmenu-skip', gap: sinceCtxKey }); return; }
   if (!$('firstSetup').classList.contains('show')) remoteMenuKeyDebounced();
 }, { capture: true });
 window.addEventListener('dblclick', e => { if (!e.shiftKey) e.preventDefault(); }, { capture: true });
@@ -512,9 +539,11 @@ function closeRemoteMenus() {
 }
 
 function remoteMenuKey() {
+  const from = remoteLayer;
   if (remoteLayer === 'closed') openChannelMenu();
   else if (remoteLayer === 'vod') openChannelMenu();
   else closeRemoteMenus();
+  keyLog({ v: 'menu', from, to: remoteLayer });
 }
 
 $('vodClose').onclick = () => openChannelMenu();
@@ -526,15 +555,16 @@ let lastToggleKeyAt = 0;
 // 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）共用去抖窗口。
 function remoteMenuKeyDebounced() {
   const now = Date.now();
-  if (now - lastToggleKeyAt < 200) return;
+  if (now - lastToggleKeyAt < 200) { keyLog({ v: 'decision', action: 'menu-suppress', via: 'contextmenu', reason: 'debounce', gap: now - lastToggleKeyAt }); return; }
   lastToggleKeyAt = now;
+  keyLog({ v: 'decision', action: 'menu-toggle', via: 'contextmenu' });
   remoteMenuKey();
 }
 window.addEventListener('keydown', event => {
   const key = event.key;
   // HOME：普通 Home 键拦下当作“回到顶层”——关掉全部浮层回到纯播放画面；
   // 浏览器级的 Alt+Home/主页多媒体键拦不住导航，由受管 profile 的主页设置兜回电视页。
-  if (key === 'Home') { event.preventDefault(); event.stopPropagation(); closeRemoteMenus(); return; }
+  if (key === 'Home') { event.preventDefault(); event.stopPropagation(); keyLog({ v: 'decision', action: 'home-top' }); closeRemoteMenus(); return; }
   const isPrevious = key === 'ArrowUp' || key === 'ArrowLeft';
   const isNext = key === 'ArrowDown' || key === 'ArrowRight';
   const isConfirm = key === 'Enter' || key === 'OK' || key === 'Select';
@@ -543,11 +573,12 @@ window.addEventListener('keydown', event => {
   event.preventDefault(); event.stopPropagation();
   if (isMenu || isConfirm) {
     const now = Date.now();
-    if (event.repeat || now - lastToggleKeyAt < 200) return;
+    if (event.repeat || now - lastToggleKeyAt < 200) { keyLog({ v: 'decision', action: isMenu ? 'menu-suppress' : 'confirm-suppress', reason: event.repeat ? 'repeat' : 'debounce', key, gap: now - lastToggleKeyAt }); return; }
     lastToggleKeyAt = now;
   }
   if (isMenu) {
     if (key === 'ContextMenu') lastCtxMenuKeyAt = Date.now();
+    keyLog({ v: 'decision', action: 'menu-toggle', via: 'keydown', key });
     remoteMenuKey();
     return;
   }

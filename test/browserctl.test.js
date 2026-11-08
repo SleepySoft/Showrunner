@@ -284,6 +284,25 @@ test('服务启动写 PID 文件（stop.ps1 定位用），close 后删除', asy
   }
 });
 
+test('POST /tv/keylog 落盘按键诊断日志（仅非托管模式，仅回环可写）', async () => {
+  const logFile = path.join(__dirname, '..', '.dev', 'tv-key.log');
+  const existed = fs.existsSync(logFile);
+  const original = existed ? fs.readFileSync(logFile, 'utf8') : null;
+  try {
+    const res = await fetch(base + '/tv/keylog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [{ v: 'key', type: 'keydown', key: 'ContextMenu', delta: 0 }, { v: 'decision', action: 'menu-toggle', via: 'keydown' }] })
+    });
+    assert.equal(res.status, 200);
+    const text = fs.readFileSync(logFile, 'utf8');
+    assert.ok(text.includes('"action":"menu-toggle"'));
+  } finally {
+    if (existed) fs.writeFileSync(logFile, original);
+    else fs.rmSync(logFile, { force: true });
+  }
+});
+
 test('POST /api/mode 切换模式', async () => {
   const s = await (await authed('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'maintenance' }) })).json();
   assert.equal(s.mode, 'maintenance');

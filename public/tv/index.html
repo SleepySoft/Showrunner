@@ -219,9 +219,12 @@ window.addEventListener('contextmenu', e => {
 }, { capture: true });
 window.addEventListener('dblclick', e => { if (!e.shiftKey) e.preventDefault(); }, { capture: true });
 // 菜单/返回键的 keyup 同样吞掉：部分按键（如 ContextMenu）浏览器在 keyup 阶段
-// 仍有默认行为（弹原生菜单/焦点转移），只拦 keydown 不够。
+// 仍有默认行为（弹原生菜单/焦点转移），只拦 keydown 不够。menu/confirm 键的 keyup
+// 还要刷新连发簇窗口（一次按压的报文成对到达）；Enter keyup 无默认危害，只刷新不拦截。
 window.addEventListener('keyup', e => {
+  if (e.key === 'Enter' || e.key === 'OK' || e.key === 'Select') { lastPadEventAt = Date.now(); return; }
   if (e.key === 'Escape' || e.key === 'ContextMenu' || e.key === 'BrowserBack' || e.key === 'Back') {
+    lastPadEventAt = Date.now();
     e.preventDefault(); e.stopPropagation();
   }
 }, { capture: true });
@@ -560,14 +563,18 @@ function remoteMenuKey() {
 $('vodClose').onclick = () => openChannelMenu();
 
 // 最小共同按键：鼠标右键菜单/返回，左键点击确认；四个方向键移动，Enter 也可确认。
-// 物理遥控器长按会反复触发同一键（自动重复或离散重发）：菜单/确认类动作 200ms 去抖，
-// 避免菜单反复开关、确认连击；方向键保留连发便于快速翻页。
-let lastToggleKeyAt = 0;
-// 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）共用去抖窗口。
+// 物理遥控器一次按压会反复发送成对报文（实测间隔可达 ~300ms）：menu/confirm 按 400ms
+// 连发簇合并（距上一报文安静 400ms 后的首个动作生效，簇内报文只滑动窗口），方向键保留
+// 每报文移动（按住连翻）。
+const PAD_QUIET_MS = 400;
+let lastPadEventAt = 0; // 上次 menu/confirm 类事件时间；连发簇内的报文（含 keyup）都刷新它
+// 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）共用窗口。
 function remoteMenuKeyDebounced() {
   const now = Date.now();
-  if (now - lastToggleKeyAt < 200) { keyLog({ v: 'decision', action: 'menu-suppress', via: 'contextmenu', reason: 'debounce', gap: now - lastToggleKeyAt }); return; }
-  lastToggleKeyAt = now;
+  const gap = now - lastPadEventAt;
+  const fresh = gap > PAD_QUIET_MS;
+  lastPadEventAt = now;
+  if (!fresh) { keyLog({ v: 'decision', action: 'menu-suppress', via: 'contextmenu', reason: 'burst', gap }); return; }
   keyLog({ v: 'decision', action: 'menu-toggle', via: 'contextmenu' });
   remoteMenuKey();
 }
@@ -584,12 +591,14 @@ window.addEventListener('keydown', event => {
   event.preventDefault(); event.stopPropagation();
   if (isMenu || isConfirm) {
     const now = Date.now();
-    if (event.repeat || now - lastToggleKeyAt < 200) { keyLog({ v: 'decision', action: isMenu ? 'menu-suppress' : 'confirm-suppress', reason: event.repeat ? 'repeat' : 'debounce', key, gap: now - lastToggleKeyAt }); return; }
-    lastToggleKeyAt = now;
+    const gap = now - lastPadEventAt;
+    const fresh = gap > PAD_QUIET_MS;
+    lastPadEventAt = now; // 连发簇内的报文也刷新窗口：按住期间的慢连发不会让窗口过期
+    if (!fresh) { keyLog({ v: 'decision', action: isMenu ? 'menu-suppress' : 'confirm-suppress', reason: 'burst', key, gap }); return; }
+    keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : 'confirm-exec', via: 'keydown', key });
   }
   if (isMenu) {
     if (key === 'ContextMenu') lastCtxMenuKeyAt = Date.now();
-    keyLog({ v: 'decision', action: 'menu-toggle', via: 'keydown', key });
     remoteMenuKey();
     return;
   }

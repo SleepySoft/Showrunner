@@ -141,7 +141,7 @@ test('mpv 音频输出未启动只记录不跳过节目，诊断页返回打码�
   }
 });
 
-test('遥控器 menu/confirm 长按重复触发在服务端去抖，up/down 翻页不受影响', async () => {
+test('遥控器 menu/confirm 连发簇报文在服务端合并，up/down 翻页不受影响', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-input-debounce-'));
   let app;
   try {
@@ -175,19 +175,19 @@ test('遥控器 menu/confirm 长按重复触发在服务端去抖，up/down 翻�
     });
     mpvFrontend.emit('input', 'menu');
     await new Promise(r => setTimeout(r, 10));
-    mpvFrontend.emit('input', 'menu'); // 长按重复：应被吞掉
+    mpvFrontend.emit('input', 'menu'); // 连发簇内重复报文：应被吞掉
     await new Promise(r => setTimeout(r, 10));
     mpvFrontend.emit('input', 'menu');
-    assert.equal(menus.length, 1, '200ms 内重复的 menu 只生效一次');
+    assert.equal(menus.length, 1, '连发簇内重复的 menu 只生效一次');
     mpvFrontend.emit('input', 'up');
     mpvFrontend.emit('input', 'up'); // 翻页不防抖
     assert.equal(menus.length, 3, 'up/down 每次都要刷新菜单');
-    await new Promise(r => setTimeout(r, 220));
-    mpvFrontend.emit('input', 'menu'); // 间隔超过 200ms：正常生效，此时菜单开着 → 关闭
+    await new Promise(r => setTimeout(r, 460));
+    mpvFrontend.emit('input', 'menu'); // 簇安静后正常生效，此时菜单开着 → 关闭
     assert.equal(menus.length, 3, '关闭菜单不再刷新 OSD 菜单');
-    await new Promise(r => setTimeout(r, 220));
-    mpvFrontend.emit('input', 'menu'); // 再超过 200ms：重新打开（manage=false 时关闭路径无界面副作用，用再开验证）
-    assert.equal(menus.length, 4, '去抖窗口过后 menu 恢复正常切换');
+    await new Promise(r => setTimeout(r, 460));
+    mpvFrontend.emit('input', 'menu'); // 再安静一个窗口：重新打开（manage=false 时关闭路径无界面副作用，用再开验证）
+    assert.equal(menus.length, 4, '连发簇安静后 menu 恢复正常切换');
   } finally {
     if (app) await app.close();
     fs.rmSync(tmp, { recursive: true, force: true });

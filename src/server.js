@@ -390,15 +390,17 @@ function createApp(cfg) {
     return { title: '切换频道', index: frontendMenu.index, items: channels.map(channel => ({ label: channel.name })) };
   };
   const showFrontendMenu = () => frontendSupervisor.showMenu(frontendMenuModel());
-  // 物理遥控器长按会反复触发同一键（HID 自动重复或离散重发）：菜单/确认类动作
-  // 200ms 内去抖，避免菜单反复开关、确认连击；up/down 翻页保留连发。
-  let lastFrontendToggleAt = 0;
+  // 物理遥控器一次按压会反复发送成对报文（实测同一次按压报文间隔可达 ~300ms，与快速
+  // 连按在时间上重叠，固定去抖窗口拦不住）：menu/confirm 按“连发簇”合并——距上一报文
+  // 安静 400ms 后的首个动作才生效；up/down 翻页保留连发。
+  let lastPadEventAt = 0;
   function handleFrontendInput(action) {
     if (!['up', 'down', 'confirm', 'menu'].includes(action)) return false;
     if (action === 'menu' || action === 'confirm') {
       const now = Date.now();
-      if (now - lastFrontendToggleAt < 200) return true;
-      lastFrontendToggleAt = now;
+      const fresh = now - lastPadEventAt > 400;
+      lastPadEventAt = now;
+      if (!fresh) return true;
     }
     if (action === 'menu') {
       if (frontendMenu?.level === 'programs') frontendMenu = { level: 'channels', index: 0 };

@@ -141,7 +141,7 @@ test('mpv 音频输出未启动只记录不跳过节目，诊断页返回打码�
   }
 });
 
-test('遥控器 menu/confirm 连发簇报文在服务端合并，up/down 翻页不受影响', async () => {
+test('遥控器按键连发簇报文在服务端合并，每动作独立计窗', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-input-debounce-'));
   let app;
   try {
@@ -180,8 +180,11 @@ test('遥控器 menu/confirm 连发簇报文在服务端合并，up/down 翻页�
     mpvFrontend.emit('input', 'menu');
     assert.equal(menus.length, 1, '连发簇内重复的 menu 只生效一次');
     mpvFrontend.emit('input', 'up');
-    mpvFrontend.emit('input', 'up'); // 翻页不防抖
-    assert.equal(menus.length, 3, 'up/down 每次都要刷新菜单');
+    mpvFrontend.emit('input', 'up'); // 连发簇内：第二步被吞
+    assert.equal(menus.length, 2, 'up 连发簇内只移动一步');
+    await new Promise(r => setTimeout(r, 460));
+    mpvFrontend.emit('input', 'up'); // 簇安静后恢复移动
+    assert.equal(menus.length, 3, 'up 簇安静后恢复一步移动');
     await new Promise(r => setTimeout(r, 460));
     mpvFrontend.emit('input', 'menu'); // 簇安静后正常生效，此时菜单开着 → 关闭
     assert.equal(menus.length, 3, '关闭菜单不再刷新 OSD 菜单');

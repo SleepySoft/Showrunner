@@ -218,13 +218,14 @@ window.addEventListener('contextmenu', e => {
   if (!$('firstSetup').classList.contains('show')) remoteMenuKeyDebounced();
 }, { capture: true });
 window.addEventListener('dblclick', e => { if (!e.shiftKey) e.preventDefault(); }, { capture: true });
-// 菜单/返回键的 keyup 同样吞掉：部分按键（如 ContextMenu）浏览器在 keyup 阶段
-// 仍有默认行为（弹原生菜单/焦点转移），只拦 keydown 不够。menu/confirm 键的 keyup
-// 还要刷新连发簇窗口（一次按压的报文成对到达）；Enter keyup 无默认危害，只刷新不拦截。
+// 已接管按键的 keyup 刷新各自连发簇窗口（一次按压的报文成对到达，滑动窗口靠它们续命）；
+// ContextMenu/Escape 等浏览器在 keyup 阶段仍有默认行为（弹原生菜单/焦点转移），一并吞掉；
+// Enter keyup 无默认危害，只刷新不拦截。
+const PAD_KEYS = ['Enter', 'OK', 'Select', 'Escape', 'ContextMenu', 'BrowserBack', 'Back', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 window.addEventListener('keyup', e => {
-  if (e.key === 'Enter' || e.key === 'OK' || e.key === 'Select') { lastPadEventAt = Date.now(); return; }
+  if (PAD_KEYS.includes(e.key)) padKeyState.set(e.key, Date.now());
+  if (e.key === 'Enter' || e.key === 'OK' || e.key === 'Select') return;
   if (e.key === 'Escape' || e.key === 'ContextMenu' || e.key === 'BrowserBack' || e.key === 'Back') {
-    lastPadEventAt = Date.now();
     e.preventDefault(); e.stopPropagation();
   }
 }, { capture: true });
@@ -571,18 +572,20 @@ function remoteBackKey() {
 $('vodClose').onclick = () => openChannelMenu();
 
 // 最小共同按键：鼠标右键菜单/返回，左键点击确认；四个方向键移动，Enter 也可确认。
-// 物理遥控器一次按压会反复发送成对报文（实测间隔可达 ~300ms）：menu/confirm 按 400ms
-// 连发簇合并（距上一报文安静 400ms 后的首个动作生效，簇内报文只滑动窗口），方向键保留
-// 每报文移动（按住连翻）。
+// 物理遥控器一次按压会反复发送成对报文（实测同一次按压报文间隔可达 ~300ms，与快速
+// 连按在时间上重叠，固定去抖窗口拦不住）：所有按键按“连发簇”合并——同一键距上一报文
+// （含 keyup）安静 PAD_QUIET_MS 后的首个动作生效，簇内报文只滑动窗口不触发。每键独立
+// 计窗：菜单键开菜单后立刻按 Enter/方向键不会被吞。代价：按住不再自动连发/连翻。
 const PAD_QUIET_MS = 400;
-let lastPadEventAt = 0; // 上次 menu/confirm 类事件时间；连发簇内的报文（含 keyup）都刷新它
-// 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）共用窗口。
+const padKeyState = new Map(); // key -> 上次事件时间（ms）
+function padFresh(key, now = Date.now()) {
+  const last = padKeyState.get(key) || 0;
+  padKeyState.set(key, now);
+  return now - last > PAD_QUIET_MS;
+}
+// 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）各自计窗。
 function remoteMenuKeyDebounced() {
-  const now = Date.now();
-  const gap = now - lastPadEventAt;
-  const fresh = gap > PAD_QUIET_MS;
-  lastPadEventAt = now;
-  if (!fresh) { keyLog({ v: 'decision', action: 'menu-suppress', via: 'contextmenu', reason: 'burst', gap }); return; }
+  if (!padFresh('__contextmenu')) { keyLog({ v: 'decision', action: 'menu-suppress', via: 'contextmenu', reason: 'burst' }); return; }
   keyLog({ v: 'decision', action: 'menu-toggle', via: 'contextmenu' });
   remoteMenuKey();
 }
@@ -599,11 +602,7 @@ window.addEventListener('keydown', event => {
   if (!isPrevious && !isNext && !isConfirm && !isMenu && !isBack) return; // 音量、电源等系统键不拦截
   event.preventDefault(); event.stopPropagation();
   if (isMenu || isConfirm || isBack) {
-    const now = Date.now();
-    const gap = now - lastPadEventAt;
-    const fresh = gap > PAD_QUIET_MS;
-    lastPadEventAt = now; // 连发簇内的报文也刷新窗口：按住期间的慢连发不会让窗口过期
-    if (!fresh) { keyLog({ v: 'decision', action: isConfirm ? 'confirm-suppress' : 'menu-suppress', reason: 'burst', key, gap }); return; }
+    if (!padFresh(key)) { keyLog({ v: 'decision', action: isConfirm ? 'confirm-suppress' : 'menu-suppress', reason: 'burst', key }); return; }
     keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : isBack ? 'back-exec' : 'confirm-exec', via: 'keydown', key });
   }
   if (isMenu) {
@@ -616,8 +615,11 @@ window.addEventListener('keydown', event => {
     if (isConfirm) return;
     openChannelMenu();
   }
-  if (isPrevious || isNext) setRemoteFocus(remoteFocus + (isNext ? 1 : -1));
-  else menuButtons()[remoteFocus]?.click();
+  if (isPrevious || isNext) {
+    if (padFresh(key)) setRemoteFocus(remoteFocus + (isNext ? 1 : -1)); // 一按一动，簇内报文不额外移动
+    return;
+  }
+  menuButtons()[remoteFocus]?.click();
 }, { capture: true });
 
 // 左键点菜单外等同取消。鼠标移动本身不再打开菜单，避免菜单刚关又被立即唤回。

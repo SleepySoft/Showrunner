@@ -649,10 +649,12 @@ $('vodClose').onclick = () => openChannelMenu();
 // - menu/back（切换类）：连发簇合并——同一键距上一报文（含 keyup）安静 PAD_QUIET_MS
 //   后的首个动作生效，簇内报文只滑动窗口；按住只触发一次。
 // - confirm/方向键（可重复类）：速率限制——同一键两次执行间隔不小于 PAD_RATE_MS，
-//   无锁死窗口，快速连按/连发簇都按节奏执行，手感跟手。
+//   无锁死窗口，快速连按/连发簇都按节奏执行，手感跟手。方向键节奏更保守
+//   （PAD_RATE_ARROWS_MS）：连发簇尾部拖尾可达 ~400ms，节奏太紧会一条跳两格。
 // 每键独立计窗/计速：菜单键开菜单后立刻按 Enter/方向键不会被吞。
 const PAD_QUIET_MS = 400;
 const PAD_RATE_MS = 300;
+const PAD_RATE_ARROWS_MS = 450;
 const padKeyState = new Map(); // key -> 上次事件时间（连发簇窗口）
 const padRateAt = new Map();   // key -> 上次执行时间（速率限制）
 function padFresh(key, now = Date.now()) {
@@ -660,9 +662,9 @@ function padFresh(key, now = Date.now()) {
   padKeyState.set(key, now);
   return now - last > PAD_QUIET_MS;
 }
-function padRateOk(key, now = Date.now()) {
+function padRateOk(key, ms = PAD_RATE_MS, now = Date.now()) {
   const last = padRateAt.get(key) || 0;
-  if (now - last < PAD_RATE_MS) return false;
+  if (now - last < ms) return false;
   padRateAt.set(key, now);
   return true;
 }
@@ -703,7 +705,7 @@ window.addEventListener('keydown', event => {
     openChannelMenu();
   }
   if (isPrevious || isNext) {
-    if (padRateOk(key)) setRemoteFocus(remoteFocus + (isNext ? 1 : -1)); // 速率限制：连发簇按节奏移动
+    if (padRateOk(key, PAD_RATE_ARROWS_MS)) setRemoteFocus(remoteFocus + (isNext ? 1 : -1)); // 速率限制：连发簇按节奏移动
     return;
   }
   const focusedBtn = menuButtons()[remoteFocus];

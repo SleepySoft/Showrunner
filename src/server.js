@@ -406,8 +406,9 @@ function createApp(cfg) {
   const showFrontendMenu = () => frontendSupervisor.showMenu(frontendMenuModel());
   // 物理遥控器一次按压会反复发送成对报文（实测同一次按压报文间隔可达 ~300ms，与快速
   // 连按在时间上重叠，固定去抖窗口拦不住）。两类策略：menu/back（切换类）按 400ms 连发
-  // 簇合并，按住只触发一次；confirm/up/down（可重复类）按 300ms 速率限制，无锁死窗口、
-  // 快速连按跟手。每动作独立计。
+  // 簇合并，按住只触发一次；confirm/up/down（可重复类）按速率限制，无锁死窗口——confirm
+  // 300ms 跟手，up/down 450ms（连发簇尾部拖尾可达 ~400ms，节奏太紧会一条跳两格）。
+  // 每动作独立计。
   const padActionAt = new Map();
   const padRateAt = new Map();
   function handleFrontendInput(action) {
@@ -418,8 +419,9 @@ function createApp(cfg) {
       padActionAt.set(action, now);
       if (!fresh) return true;
     } else {
+      const min = action === 'confirm' ? 300 : 450;
       const last = padRateAt.get(action) || 0;
-      if (now - last < 300) return true;
+      if (now - last < min) return true;
       padRateAt.set(action, now);
     }
     if (action === 'back') {

@@ -100,7 +100,8 @@ class PlaylistManager extends EventEmitter {
     return this.playlists.filter(p => p.enabled).map(p => ({
       id: p.id, name: p.name, selected: p.id === this.activeId,
       allowOnDemand: !!p.allowOnDemand,
-      items: p.allowOnDemand ? p.items.map(i => ({ qid: i.qid, title: i.title })) : undefined
+      // type/collectionId 供电视端区分普通条目与合集（合集可展开选集）
+      items: p.allowOnDemand ? p.items.map(i => ({ qid: i.qid, title: i.title, type: i.type, collectionId: i.collectionId })) : undefined
     }));
   }
 

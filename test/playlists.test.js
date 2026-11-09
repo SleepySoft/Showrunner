@@ -60,6 +60,7 @@ test('频道启用、点播权限、纯点播和节目时间设置', () => {
   assert.equal(m.get(p.id).items[0].startTime, '18:30');
   assert.equal(m.get(p.id).items[0].maxPlaySeconds, 1200);
   assert.equal(m.tvList()[0].items[0].title, '第一集');
+  assert.equal(m.tvList()[0].items[0].type, 'web'); // 类型供电视端区分合集/普通条目
 
   m.setOptions(p.id, { allowOnDemand: false });
   assert.equal(m.tvList()[0].items, undefined); // 不允许点播时不向电视暴露目录

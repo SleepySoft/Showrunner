@@ -391,15 +391,23 @@ function createApp(cfg) {
   };
   const showFrontendMenu = () => frontendSupervisor.showMenu(frontendMenuModel());
   // 物理遥控器一次按压会反复发送成对报文（实测同一次按压报文间隔可达 ~300ms，与快速
-  // 连按在时间上重叠，固定去抖窗口拦不住）：所有动作按“连发簇”合并——同一动作距上一
-  // 报文安静 400ms 后的首个生效，簇内报文只滑动窗口；每动作独立计窗，按住不再连发。
+  // 连按在时间上重叠，固定去抖窗口拦不住）。两类策略：menu/back（切换类）按 400ms 连发
+  // 簇合并，按住只触发一次；confirm/up/down（可重复类）按 300ms 速率限制，无锁死窗口、
+  // 快速连按跟手。每动作独立计。
   const padActionAt = new Map();
+  const padRateAt = new Map();
   function handleFrontendInput(action) {
     if (!['up', 'down', 'confirm', 'menu', 'back'].includes(action)) return false;
     const now = Date.now();
-    const fresh = now - (padActionAt.get(action) || 0) > 400;
-    padActionAt.set(action, now);
-    if (!fresh) return true;
+    if (action === 'menu' || action === 'back') {
+      const fresh = now - (padActionAt.get(action) || 0) > 400;
+      padActionAt.set(action, now);
+      if (!fresh) return true;
+    } else {
+      const last = padRateAt.get(action) || 0;
+      if (now - last < 300) return true;
+      padRateAt.set(action, now);
+    }
     if (action === 'back') {
       // 返回键只关不开：点播列表 → 频道菜单 → 关闭；未开菜单时无动作
       if (frontendMenu?.level === 'programs') { frontendMenu = { level: 'channels', index: 0 }; showFrontendMenu(); }

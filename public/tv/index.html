@@ -579,15 +579,26 @@ $('vodClose').onclick = () => openChannelMenu();
 
 // 最小共同按键：鼠标右键菜单/返回，左键点击确认；四个方向键移动，Enter 也可确认。
 // 物理遥控器一次按压会反复发送成对报文（实测同一次按压报文间隔可达 ~300ms，与快速
-// 连按在时间上重叠，固定去抖窗口拦不住）：所有按键按“连发簇”合并——同一键距上一报文
-// （含 keyup）安静 PAD_QUIET_MS 后的首个动作生效，簇内报文只滑动窗口不触发。每键独立
-// 计窗：菜单键开菜单后立刻按 Enter/方向键不会被吞。代价：按住不再自动连发/连翻。
+// 连按在时间上重叠，固定去抖窗口拦不住）。两类按键两种策略：
+// - menu/back（切换类）：连发簇合并——同一键距上一报文（含 keyup）安静 PAD_QUIET_MS
+//   后的首个动作生效，簇内报文只滑动窗口；按住只触发一次。
+// - confirm/方向键（可重复类）：速率限制——同一键两次执行间隔不小于 PAD_RATE_MS，
+//   无锁死窗口，快速连按/连发簇都按节奏执行，手感跟手。
+// 每键独立计窗/计速：菜单键开菜单后立刻按 Enter/方向键不会被吞。
 const PAD_QUIET_MS = 400;
-const padKeyState = new Map(); // key -> 上次事件时间（ms）
+const PAD_RATE_MS = 300;
+const padKeyState = new Map(); // key -> 上次事件时间（连发簇窗口）
+const padRateAt = new Map();   // key -> 上次执行时间（速率限制）
 function padFresh(key, now = Date.now()) {
   const last = padKeyState.get(key) || 0;
   padKeyState.set(key, now);
   return now - last > PAD_QUIET_MS;
+}
+function padRateOk(key, now = Date.now()) {
+  const last = padRateAt.get(key) || 0;
+  if (now - last < PAD_RATE_MS) return false;
+  padRateAt.set(key, now);
+  return true;
 }
 // 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）各自计窗。
 function remoteMenuKeyDebounced() {
@@ -607,9 +618,13 @@ window.addEventListener('keydown', event => {
   const isBack = key === 'Escape' || key === 'BrowserBack' || key === 'Back'; // 返回键：只关不开
   if (!isPrevious && !isNext && !isConfirm && !isMenu && !isBack) return; // 音量、电源等系统键不拦截
   event.preventDefault(); event.stopPropagation();
-  if (isMenu || isConfirm || isBack) {
-    if (!padFresh(key)) { keyLog({ v: 'decision', action: isConfirm ? 'confirm-suppress' : 'menu-suppress', reason: 'burst', key }); return; }
-    keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : isBack ? 'back-exec' : 'confirm-exec', via: 'keydown', key });
+  if (isMenu || isBack) {
+    if (!padFresh(key)) { keyLog({ v: 'decision', action: 'menu-suppress', reason: 'burst', key }); return; }
+    keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : 'back-exec', via: 'keydown', key });
+  }
+  if (isConfirm) {
+    if (!padRateOk(key)) { keyLog({ v: 'decision', action: 'confirm-suppress', reason: 'rate', key }); return; }
+    keyLog({ v: 'decision', action: 'confirm-exec', via: 'keydown', key });
   }
   if (isMenu) {
     lastCtxMenuKeyAt = Date.now();
@@ -622,7 +637,7 @@ window.addEventListener('keydown', event => {
     openChannelMenu();
   }
   if (isPrevious || isNext) {
-    if (padFresh(key)) setRemoteFocus(remoteFocus + (isNext ? 1 : -1)); // 一按一动，簇内报文不额外移动
+    if (padRateOk(key)) setRemoteFocus(remoteFocus + (isNext ? 1 : -1)); // 速率限制：连发簇按节奏移动
     return;
   }
   const focusedBtn = menuButtons()[remoteFocus];

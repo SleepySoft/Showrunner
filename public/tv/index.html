@@ -479,8 +479,14 @@ function renderChannelControls(s) {
     b.className = c.selected ? 'on' : '';
     b.dataset.channelId = c.id;
     b.onclick = () => {
-      if (c.id !== lastState?.selectedChannelId) ws?.send(JSON.stringify({ type: 'selectChannel', channelId: c.id }));
-      closeRemoteMenus();
+      if (c.id === lastState?.selectedChannelId && c.allowOnDemand && (c.items || []).length) {
+        keyLog({ v: 'click', target: 'channel-vod', id: c.id, items: c.items.length });
+        openVod(c); // 当前频道：确认=进入点播（与 mpv 前端一致），避免“点了没反应”
+      } else {
+        keyLog({ v: 'click', target: 'channel', id: c.id, isCurrent: c.id === lastState?.selectedChannelId, ws: ws?.readyState });
+        if (c.id !== lastState?.selectedChannelId) ws?.send(JSON.stringify({ type: 'selectChannel', channelId: c.id }));
+        closeRemoteMenus();
+      }
     };
     b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
     box.appendChild(b);
@@ -489,7 +495,7 @@ function renderChannelControls(s) {
     const b = document.createElement('button');
     b.textContent = `浏览「${selected.name}」节目`;
     b.dataset.action = 'vod';
-    b.onclick = () => openVod(selected);
+    b.onclick = () => { keyLog({ v: 'click', target: 'vod', name: selected.name }); openVod(selected); };
     b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
     box.appendChild(b);
   }
@@ -510,7 +516,7 @@ function openVod(channel) {
   const items = $('vodItems'); items.innerHTML = '';
   (channel.items || []).forEach(item => {
     const b = document.createElement('button'); b.textContent = item.title;
-    b.onclick = () => { ws?.send(JSON.stringify({ type: 'onDemand', qid: item.qid })); closeRemoteMenus(); };
+    b.onclick = () => { keyLog({ v: 'click', target: 'vodItem', qid: item.qid, ws: ws?.readyState }); ws?.send(JSON.stringify({ type: 'onDemand', qid: item.qid })); closeRemoteMenus(); };
     b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
     items.appendChild(b);
   });
@@ -619,7 +625,9 @@ window.addEventListener('keydown', event => {
     if (padFresh(key)) setRemoteFocus(remoteFocus + (isNext ? 1 : -1)); // 一按一动，簇内报文不额外移动
     return;
   }
-  menuButtons()[remoteFocus]?.click();
+  const focusedBtn = menuButtons()[remoteFocus];
+  keyLog({ v: 'decision', action: 'confirm-click', index: remoteFocus, found: !!focusedBtn, label: String(focusedBtn?.textContent || '').slice(0, 30), ws: ws?.readyState });
+  focusedBtn?.click();
 }, { capture: true });
 
 // 左键点菜单外等同取消。鼠标移动本身不再打开菜单，避免菜单刚关又被立即唤回。

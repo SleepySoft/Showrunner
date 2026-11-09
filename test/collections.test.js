@@ -101,6 +101,23 @@ test('resetCursor 归零游标', () => {
   assert.equal(cm.takeNext(c.id).item.title, 'E1');
 });
 
+test('takeAt 取指定一集并把游标推进到该集之后', () => {
+  const cm = new CollectionManager(null);
+  const c = cm.create('剧');
+  const a = cm.addItem(c.id, localItem('E1'));
+  const b = cm.addItem(c.id, localItem('E2'));
+  cm.addItem(c.id, localItem('E3'));
+
+  const r = cm.takeAt(c.id, b.qid);
+  assert.equal(r.item.title, 'E2');
+  assert.equal(r.episode, 2);
+  assert.equal(r.total, 3);
+  assert.equal(cm.get(c.id).cursor, 2); // 下次自动连播从 E3 开始
+  assert.equal(cm.takeAt(c.id, '不存在'), null);
+  assert.equal(cm.takeAt('不存在', a.qid), null);
+  assert.equal(cm.takeNext(c.id).item.title, 'E3');
+});
+
 test('删除游标之前的条目时游标同步前移', () => {
   const cm = new CollectionManager(null);
   const c = cm.create('剧');

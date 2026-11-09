@@ -350,6 +350,7 @@ test('电视端与遥控器页面可访问', async () => {
   assert.match(tvHtml, /compatibilityRequest/);
   assert.match(tvHtml, /reason: 'compatibility_failed'/);
   assert.doesNotMatch(tvHtml, /addEventListener\('mousemove'/);
+  assert.match(tvHtml, /collection-episodes/);
   assert.match(tvHtml, /音量、电源等系统键不拦截/);
   const remoteRes = await fetch(base + '/remote/');
   assert.equal(remoteRes.status, 200);

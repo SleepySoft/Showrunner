@@ -208,6 +208,56 @@ test('遥控器按键连发簇报文在服务端合并，每动作独立计窗',
   }
 });
 
+test('点播合集条目可指定分集：playOnDemand(qid, episodeQid) 一次性解析并推进游标', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-episode-vod-'));
+  let app;
+  try {
+    const dataFile = path.join(tmp, 'showrunner.json');
+    fs.writeFileSync(dataFile, JSON.stringify({
+      playlists: [{ id: 'p1', name: '频道', enabled: true, allowOnDemand: true, autoPlay: false, items: [
+        { qid: 'plain0', type: 'local', mediaId: 'm0', title: '普通片' },
+        { qid: 'entry1', type: 'collection', collectionId: 'col1', title: '剧集' }
+      ] }],
+      activeId: 'p1', currentIndex: 0,
+      playback: { status: 'idle', position: 0, duration: 0, volume: 1 },
+      settings: {},
+      collections: [{ id: 'col1', name: '剧', mode: 'sequential', cursor: 0, items: [
+        { qid: 'e1', type: 'local', mediaId: 'm1', title: 'E1' },
+        { qid: 'e2', type: 'local', mediaId: 'm2', title: 'E2' },
+        { qid: 'e3', type: 'local', mediaId: 'm3', title: 'E3' }
+      ] }]
+    }));
+    class FakeMpv extends EventEmitter {
+      constructor() { super(); this.running = true; }
+      async start() { this.running = true; return true; }
+      async stop() { this.running = false; }
+      async load() {} async play() {} async pause() {} async seek() {} async setVolume() {}
+      async showStandby() {} showMenu() {}
+      status() { return { type: 'mpv', available: true, running: this.running, ready: this.running, currentQid: null, lastError: null }; }
+    }
+    app = await start({
+      rootDir: path.join(__dirname, '..'), password: 'pw', host: '127.0.0.1', port: 0,
+      dataFile, mediaDirs: [], cacheDir: path.join(tmp, 'cache'), disableCache: true,
+      manageBrowser: false, playerFrontend: 'mpv', mpvFrontend: new FakeMpv()
+    });
+    assert.equal(app.playOnDemand('entry1', 'e2'), true);
+    const pub = app.queue.getPublicState().current;
+    assert.match(pub.title, /第2集 E2$/); // getPublicState 把解析结果伪装成普通条目
+    assert.equal(pub.mediaId, 'm2');
+    assert.equal(app.queue.current()?.resolved?.episode, 2);
+    assert.equal(app.collections.get('col1').cursor, 2); // 游标推进到指定集之后
+    assert.equal(app.playOnDemand('entry1', 'not-exist'), false); // 非该合集分集：拒绝且不污染覆盖
+    assert.equal(app.collections.takeNext('col1').item.title, 'E3'); // 覆盖一次性：之后回到自动连播
+    // 分集列表端点（仅回环）
+    const eps = await (await fetch(`http://127.0.0.1:${app.port}/tv/collection-episodes?id=col1`)).json();
+    assert.equal(eps.episodes.length, 3);
+    assert.equal(eps.episodes[1].qid, 'e2');
+  } finally {
+    if (app) await app.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('电视报告格式不支持时启动兼容转换而不是跳过节目', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showrunner-compat-ws-'));
   let app;

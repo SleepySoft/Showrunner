@@ -75,7 +75,7 @@ function setupWs(server, { auth, queue, getState, onTvEnded, onTvIssue, onTvComp
       } else if (msg.type === 'selectChannel' && onTvSelectChannel) {
         onTvSelectChannel(String(msg.channelId || ''));
       } else if (msg.type === 'onDemand' && onTvOnDemand) {
-        onTvOnDemand(String(msg.qid || ''));
+        onTvOnDemand(String(msg.qid || ''), msg.episodeQid ? String(msg.episodeQid) : null);
       }
     });
 

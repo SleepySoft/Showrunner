@@ -122,8 +122,15 @@ function createApp(cfg) {
   let onDemandActive = false;
   let schedulerHoldingStandby = false;
 
-  // 合集解析器：轮到「合集抽一集」条目时，从合集取下一集
+  // 合集解析器：轮到「合集抽一集」条目时，从合集取下一集；点播指定集时优先取指定集（一次性）
+  const forcedEpisodeByQid = new Map(); // 频道条目 qid -> 指定分集 qid
   queue.resolver = (qItem) => {
+    const forced = forcedEpisodeByQid.get(qItem.qid);
+    if (forced) {
+      forcedEpisodeByQid.delete(qItem.qid);
+      const fr = collections.takeAt(qItem.collectionId, forced);
+      if (fr) return { ...fr.item, episode: fr.episode, total: fr.total };
+    }
     const r = collections.takeNext(qItem.collectionId);
     if (!r) return null;
     return { ...r.item, episode: r.episode, total: r.total };
@@ -365,9 +372,16 @@ function createApp(cfg) {
     return true;
   }
 
-  function playOnDemand(qid) {
+  function playOnDemand(qid, episodeQid = null) {
     const channel = playlists.active();
-    if (!channel?.enabled || !channel.allowOnDemand || !channel.items.some(i => i.qid === qid)) return false;
+    const item = channel?.enabled && channel.allowOnDemand ? channel.items.find(i => i.qid === qid) : null;
+    if (!item) return false;
+    if (episodeQid) {
+      // 点播合集的指定分集：一次性解析覆盖，游标推进到该集之后
+      const collection = item.type === 'collection' ? collections.get(item.collectionId) : null;
+      if (!collection?.items.some(e => e.qid === episodeQid)) return false;
+      forcedEpisodeByQid.set(qid, episodeQid);
+    }
     onDemandActive = true;
     return queue.jump(qid);
   }
@@ -527,6 +541,15 @@ function createApp(cfg) {
       passwordRecovery: setup.required ? null : passwordRecovery.localInfo(),
       remoteUrls: remoteUrls(req.socket.localPort || cfg.port)
     });
+  });
+
+  // 电视端点播选集：把合集条目展开为分集列表（仅回环，不鉴权——与 /tv/setup-info 同级）
+  app.get('/tv/collection-episodes', (req, res) => {
+    if (!isLoopback(req.socket.remoteAddress)) return res.status(404).end();
+    const c = collections.get(String(req.query.id || ''));
+    if (!c) return res.status(404).json({ error: '合集不存在' });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ id: c.id, name: c.name, episodes: c.items.map((it, i) => ({ qid: it.qid, title: it.title, index: i + 1 })) });
   });
 
   // 播放端与媒体流：局域网专用，不鉴权

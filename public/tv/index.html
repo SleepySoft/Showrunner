@@ -511,19 +511,80 @@ function renderChannelControls(s) {
   }
 }
 
-function openVod(channel) {
-  $('vodTitle').textContent = `「${channel.name}」节目点播`;
-  const items = $('vodItems'); items.innerHTML = '';
-  (channel.items || []).forEach(item => {
-    const b = document.createElement('button'); b.textContent = item.title;
-    b.onclick = () => { keyLog({ v: 'click', target: 'vodItem', qid: item.qid, ws: ws?.readyState }); ws?.send(JSON.stringify({ type: 'onDemand', qid: item.qid })); closeRemoteMenus(); };
-    b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
-    items.appendChild(b);
-  });
+let vodView = null; // null=未打开；{ channel } 频道条目标级；{ channel, item } 合集分集级
+
+async function renderVod() {
+  const view = vodView;
+  if (!view) return;
+  const { channel, item } = view;
   $('channelControls').classList.remove('show');
   $('vodPanel').classList.add('show');
   document.body.classList.add('interactive');
-  remoteLayer = 'vod'; remoteFocus = 0; setRemoteFocus(0);
+  remoteLayer = 'vod';
+  const items = $('vodItems');
+  items.innerHTML = '';
+  if (!item) {
+    $('vodTitle').textContent = `「${channel.name}」节目点播`;
+    (channel.items || []).forEach(entry => {
+      const b = document.createElement('button');
+      b.textContent = entry.type === 'collection' ? `${entry.title}（合集 · 左键选集）` : entry.title;
+      b.onclick = () => {
+        if (entry.type === 'collection' && entry.collectionId) {
+          keyLog({ v: 'click', target: 'collection', id: entry.collectionId });
+          vodView = { channel, item: entry };
+          renderVod();
+        } else {
+          keyLog({ v: 'click', target: 'vodItem', qid: entry.qid, ws: ws?.readyState });
+          ws?.send(JSON.stringify({ type: 'onDemand', qid: entry.qid }));
+          closeRemoteMenus();
+        }
+      };
+      b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
+      items.appendChild(b);
+    });
+    remoteFocus = 0; setRemoteFocus(0);
+    return;
+  }
+  // 合集分集级
+  $('vodTitle').textContent = `「${item.title}」选集`;
+  const loading = document.createElement('button');
+  loading.textContent = '加载分集…'; loading.disabled = true;
+  items.appendChild(loading);
+  remoteFocus = 0; setRemoteFocus(0);
+  let episodes = [];
+  try {
+    const r = await fetch(`/tv/collection-episodes?id=${encodeURIComponent(item.collectionId)}`, { cache: 'no-store' });
+    if (r.ok) episodes = (await r.json()).episodes || [];
+  } catch {}
+  if (vodView !== view) return; // 等待期间用户已按返回键切走
+  items.innerHTML = '';
+  if (!episodes.length) {
+    const empty = document.createElement('button');
+    empty.textContent = '（无分集）'; empty.disabled = true;
+    items.appendChild(empty);
+  }
+  episodes.forEach(ep => {
+    const b = document.createElement('button');
+    b.textContent = `${ep.index}. ${ep.title}`;
+    b.onclick = () => {
+      keyLog({ v: 'click', target: 'episode', qid: ep.qid, entry: item.qid, ws: ws?.readyState });
+      ws?.send(JSON.stringify({ type: 'onDemand', qid: item.qid, episodeQid: ep.qid }));
+      closeRemoteMenus();
+    };
+    b.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(b));
+    items.appendChild(b);
+  });
+  const back = document.createElement('button');
+  back.textContent = '← 返回节目列表';
+  back.onclick = () => { vodView = { channel }; renderVod(); };
+  back.onmouseenter = () => setRemoteFocus(menuButtons().indexOf(back));
+  items.appendChild(back);
+  remoteFocus = 0; setRemoteFocus(0);
+}
+
+function openVod(channel) {
+  vodView = { channel };
+  renderVod();
 }
 
 function menuButtons() {
@@ -543,6 +604,7 @@ function setRemoteFocus(index) {
 
 function openChannelMenu() {
   clearTimeout(controlsTimer);
+  vodView = null;
   remoteLayer = 'channels';
   $('vodPanel').classList.remove('show');
   $('channelControls').classList.add('show');
@@ -552,6 +614,7 @@ function openChannelMenu() {
 
 function closeRemoteMenus() {
   clearTimeout(controlsTimer);
+  vodView = null;
   remoteLayer = 'closed'; remoteFocus = 0;
   $('channelControls').classList.remove('show');
   $('vodPanel').classList.remove('show');
@@ -567,10 +630,13 @@ function remoteMenuKey() {
   keyLog({ v: 'menu', from, to: remoteLayer });
 }
 
-// 返回键（Escape/BrowserBack/Back）只关不开：点播列表 → 频道菜单 → 关闭；未开菜单时无动作。
+// 返回键（Escape/BrowserBack/Back）只关不开：分集级→条目级→频道菜单→关闭；未开菜单时无动作。
 function remoteBackKey() {
   const from = remoteLayer;
-  if (remoteLayer === 'vod') openChannelMenu();
+  if (remoteLayer === 'vod') {
+    if (vodView?.item) { vodView = { channel: vodView.channel }; renderVod(); }
+    else openChannelMenu();
+  }
   else if (remoteLayer === 'channels') closeRemoteMenus();
   keyLog({ v: 'menu', action: 'back', from, to: remoteLayer });
 }

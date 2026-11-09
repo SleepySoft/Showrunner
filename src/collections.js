@@ -131,6 +131,20 @@ class CollectionManager extends EventEmitter {
   }
 
   /**
+   * 取指定一集（按条目 qid），不依赖游标；sequential 模式把游标推进到该集之后
+   * （下次自动连播从下一集开始）。返回 { item, episode, total } 或 null。
+   */
+  takeAt(id, qid) {
+    const c = this.get(id);
+    if (!c || c.items.length === 0) return null;
+    const idx = c.items.findIndex(i => i.qid === qid);
+    if (idx < 0) return null;
+    if (c.mode !== 'random') c.cursor = (idx + 1) % c.items.length;
+    this.emit('change');
+    return { item: c.items[idx], episode: idx + 1, total: c.items.length };
+  }
+
+  /**
    * 取下一集并推进游标。返回 { item, episode, total } 或 null（空合集）。
    * episode 从 1 起，供展示「第 N 集」。
    */

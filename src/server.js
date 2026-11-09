@@ -395,12 +395,18 @@ function createApp(cfg) {
   // 安静 400ms 后的首个动作才生效；up/down 翻页保留连发。
   let lastPadEventAt = 0;
   function handleFrontendInput(action) {
-    if (!['up', 'down', 'confirm', 'menu'].includes(action)) return false;
-    if (action === 'menu' || action === 'confirm') {
+    if (!['up', 'down', 'confirm', 'menu', 'back'].includes(action)) return false;
+    if (action === 'menu' || action === 'confirm' || action === 'back') {
       const now = Date.now();
       const fresh = now - lastPadEventAt > 400;
       lastPadEventAt = now;
       if (!fresh) return true;
+    }
+    if (action === 'back') {
+      // 返回键只关不开：点播列表 → 频道菜单 → 关闭；未开菜单时无动作
+      if (frontendMenu?.level === 'programs') { frontendMenu = { level: 'channels', index: 0 }; showFrontendMenu(); }
+      else if (frontendMenu) { frontendMenu = null; frontendSupervisor.sync(getTvState()); }
+      return true;
     }
     if (action === 'menu') {
       if (frontendMenu?.level === 'programs') frontendMenu = { level: 'channels', index: 0 };

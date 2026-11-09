@@ -188,6 +188,17 @@ test('遥控器 menu/confirm 连发簇报文在服务端合并，up/down 翻页�
     await new Promise(r => setTimeout(r, 460));
     mpvFrontend.emit('input', 'menu'); // 再安静一个窗口：重新打开（manage=false 时关闭路径无界面副作用，用再开验证）
     assert.equal(menus.length, 4, '连发簇安静后 menu 恢复正常切换');
+    mpvFrontend.emit('input', 'back'); // 连发簇内：被吞
+    assert.equal(menus.length, 4, 'back 在簇内同样合并');
+    await new Promise(r => setTimeout(r, 460));
+    mpvFrontend.emit('input', 'back'); // 菜单开着：back 关闭，无界面刷新
+    assert.equal(menus.length, 4, 'back 关闭菜单不刷新 OSD');
+    await new Promise(r => setTimeout(r, 460));
+    mpvFrontend.emit('input', 'back'); // 菜单已关：back 只关不开
+    assert.equal(menus.length, 4, 'back 不会误开菜单');
+    await new Promise(r => setTimeout(r, 460));
+    mpvFrontend.emit('input', 'menu');
+    assert.equal(menus.length, 5, '菜单键仍能正常打开');
   } finally {
     if (app) await app.close();
     fs.rmSync(tmp, { recursive: true, force: true });

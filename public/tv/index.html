@@ -560,6 +560,14 @@ function remoteMenuKey() {
   keyLog({ v: 'menu', from, to: remoteLayer });
 }
 
+// 返回键（Escape/BrowserBack/Back）只关不开：点播列表 → 频道菜单 → 关闭；未开菜单时无动作。
+function remoteBackKey() {
+  const from = remoteLayer;
+  if (remoteLayer === 'vod') openChannelMenu();
+  else if (remoteLayer === 'channels') closeRemoteMenus();
+  keyLog({ v: 'menu', action: 'back', from, to: remoteLayer });
+}
+
 $('vodClose').onclick = () => openChannelMenu();
 
 // 最小共同按键：鼠标右键菜单/返回，左键点击确认；四个方向键移动，Enter 也可确认。
@@ -586,22 +594,24 @@ window.addEventListener('keydown', event => {
   const isPrevious = key === 'ArrowUp' || key === 'ArrowLeft';
   const isNext = key === 'ArrowDown' || key === 'ArrowRight';
   const isConfirm = key === 'Enter' || key === 'OK' || key === 'Select';
-  const isMenu = key === 'Escape' || key === 'ContextMenu' || key === 'BrowserBack' || key === 'Back';
-  if (!isPrevious && !isNext && !isConfirm && !isMenu) return; // 音量、电源等系统键不拦截
+  const isMenu = key === 'ContextMenu';
+  const isBack = key === 'Escape' || key === 'BrowserBack' || key === 'Back'; // 返回键：只关不开
+  if (!isPrevious && !isNext && !isConfirm && !isMenu && !isBack) return; // 音量、电源等系统键不拦截
   event.preventDefault(); event.stopPropagation();
-  if (isMenu || isConfirm) {
+  if (isMenu || isConfirm || isBack) {
     const now = Date.now();
     const gap = now - lastPadEventAt;
     const fresh = gap > PAD_QUIET_MS;
     lastPadEventAt = now; // 连发簇内的报文也刷新窗口：按住期间的慢连发不会让窗口过期
-    if (!fresh) { keyLog({ v: 'decision', action: isMenu ? 'menu-suppress' : 'confirm-suppress', reason: 'burst', key, gap }); return; }
-    keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : 'confirm-exec', via: 'keydown', key });
+    if (!fresh) { keyLog({ v: 'decision', action: isConfirm ? 'confirm-suppress' : 'menu-suppress', reason: 'burst', key, gap }); return; }
+    keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : isBack ? 'back-exec' : 'confirm-exec', via: 'keydown', key });
   }
   if (isMenu) {
-    if (key === 'ContextMenu') lastCtxMenuKeyAt = Date.now();
+    lastCtxMenuKeyAt = Date.now();
     remoteMenuKey();
     return;
   }
+  if (isBack) { remoteBackKey(); return; }
   if (remoteLayer === 'closed') {
     if (isConfirm) return;
     openChannelMenu();

@@ -531,6 +531,7 @@ async function renderVod() {
       b.onclick = () => {
         if (entry.type === 'collection' && entry.collectionId) {
           keyLog({ v: 'click', target: 'collection', id: entry.collectionId });
+          coolConfirmKeys(); // 即将换层：吞掉同一次按压的 confirm 尾部
           vodView = { channel, item: entry };
           renderVod();
         } else {
@@ -583,6 +584,7 @@ async function renderVod() {
 }
 
 function openVod(channel) {
+  coolConfirmKeys();
   vodView = { channel };
   renderVod();
 }
@@ -668,6 +670,17 @@ function padRateOk(key, ms = PAD_RATE_MS, now = Date.now()) {
   padRateAt.set(key, now);
   return true;
 }
+// 确认键造成 UI 换层（展开点播/分集列表）后，同一次按压的尾部报文会落在新列表上
+// 再次触发——换层后给确认键 500ms 冷却，吞掉尾部。
+const padCoolAt = new Map();
+const CONFIRM_KEYS = ['Enter', 'OK', 'Select'];
+function coolConfirmKeys(ms = 500) {
+  const until = Date.now() + ms;
+  for (const k of CONFIRM_KEYS) padCoolAt.set(k, until);
+}
+function padCooling(key, now = Date.now()) {
+  return now < (padCoolAt.get(key) || 0);
+}
 // 菜单键两个入口（ContextMenu 键的 keydown、鼠标/键盘触发的 contextmenu 事件）各自计窗。
 function remoteMenuKeyDebounced() {
   if (!padFresh('__contextmenu')) { keyLog({ v: 'decision', action: 'menu-suppress', via: 'contextmenu', reason: 'burst' }); return; }
@@ -691,7 +704,7 @@ window.addEventListener('keydown', event => {
     keyLog({ v: 'decision', action: isMenu ? 'menu-toggle' : 'back-exec', via: 'keydown', key });
   }
   if (isConfirm) {
-    if (!padRateOk(key)) { keyLog({ v: 'decision', action: 'confirm-suppress', reason: 'rate', key }); return; }
+    if (padCooling(key) || !padRateOk(key)) { keyLog({ v: 'decision', action: 'confirm-suppress', reason: padCooling(key) ? 'cool' : 'rate', key }); return; }
     keyLog({ v: 'decision', action: 'confirm-exec', via: 'keydown', key });
   }
   if (isMenu) {

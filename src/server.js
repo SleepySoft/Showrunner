@@ -411,6 +411,7 @@ function createApp(cfg) {
   // 每动作独立计。
   const padActionAt = new Map();
   const padRateAt = new Map();
+  let confirmCoolUntil = 0; // 展开分集列表后吞掉同一次按压的 confirm 尾部
   function handleFrontendInput(action) {
     if (!['up', 'down', 'confirm', 'menu', 'back'].includes(action)) return false;
     const now = Date.now();
@@ -419,6 +420,7 @@ function createApp(cfg) {
       padActionAt.set(action, now);
       if (!fresh) return true;
     } else {
+      if (action === 'confirm' && now < confirmCoolUntil) return true;
       const min = action === 'confirm' ? 300 : 450;
       const last = padRateAt.get(action) || 0;
       if (now - last < min) return true;
@@ -452,6 +454,7 @@ function createApp(cfg) {
       if (!channel) return false;
       if (channel.id === playlists.activeId && channel.allowOnDemand && channel.items?.length) {
         frontendMenu = { level: 'programs', channelId: channel.id, index: 0 };
+        confirmCoolUntil = Date.now() + 500; // 换层后吞掉同一次按压的 confirm 尾部
         showFrontendMenu();
       } else {
         selectChannel(channel.id, { tv: true, play: true });
